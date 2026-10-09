@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Ticketing Portal - Bookings Module</title>
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f6f8;
+        }
+        .card-custom {
+            border: 1px solid #e2e8f0;
+        }
+        .fs-7 {
+            font-size: 0.82rem;
+        }
+
+        
+        .ticket-stub {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 16px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08);
+        }
+        .ticket-header {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #ffffff;
+            padding: 16px 20px;
+        }
+        .ticket-body {
+            padding: 20px;
+        }
+        /* Ticket Cut-Out Line & Side Notches */
+        .ticket-divider {
+            border-top: 2px dashed #cbd5e1;
+            position: relative;
+            margin: 20px -20px 16px -20px;
+        }
+        .ticket-divider::before, .ticket-divider::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background-color: #ffffff;
+            border-radius: 50%;
+            top: -11px;
+            border: 1px solid #cbd5e1;
+        }
+        .ticket-divider::before {
+            left: -11px;
+            clip-path: inset(0 0 0 50%);
+        }
+        .ticket-divider::after {
+            right: -11px;
+            clip-path: inset(0 50% 0 0);
+        }
+        .barcode-box {
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 12px;
+        }
+    </style>
+</head>
+<body class="py-5">
+
+<div class="container" style="max-width: 960px;">
+    
+    
+    <div class="text-center mb-4">
+        <span class="badge bg-primary-subtle text-primary fw-semibold px-3 py-2 rounded-pill mb-2">Ticketing & External API Module</span>
+        <h2 class="fw-bold text-dark mb-1">Event Booking Portal</h2>
+        <p class="text-secondary small">Demonstrating RESTful API transactions & SendGrid email verification.</p>
+    </div>
+
+   
+    <div class="card card-custom bg-white shadow-sm rounded-4 mb-4">
+        <div class="card-body py-3 px-4 d-flex flex-column flex-md-row justify-content-between align-items-center gap-3">
+            <div class="d-flex align-items-center">
+                <span class="spinner-grow spinner-grow-sm text-success me-2" role="status"></span>
+                <span class="small text-secondary me-2">Authenticated Session:</span>
+                <strong class="text-dark small">Muhammad Fikri (User ID: 1)</strong>
+            </div>
+            <button id="logoutButton" type="button" class="btn btn-sm btn-outline-secondary px-3">
+                Logout
+            </button>
+        </div>
+    </div>
+
+    
+    <div id="alertBox" class="alert d-none mb-4" role="alert" aria-live="polite"></div>
+
+    <div class="row g-4">
+        
+        
+        <div class="col-12 col-md-5">
+            <div class="card card-custom shadow-sm rounded-4 bg-white p-4 h-100">
+                <div class="card-body p-0">
+                    <h5 class="fw-bold text-dark mb-1">Book Ticket</h5>
+                    <p class="text-secondary small mb-4">Select event and quantity to submit booking.</p>
+
+                    <form id="bookingForm" novalidate>
+                        <!-- Event Select -->
+                        <div class="mb-3">
+                            <label for="event_id" class="form-label text-secondary small fw-medium">Select Event</label>
+                            <select class="form-select form-select-lg fs-6" id="event_id" onchange="calculateTotal()" required>
+                                <option value="1" data-price="50" selected>Konsert Live 2026 (RM 50.00)</option>
+                            </select>
+                        </div>
+
+                        
+                        <div class="mb-3">
+                            <label for="quantity" class="form-label text-secondary small fw-medium">Ticket Quantity</label>
+                            <input type="number" class="form-control form-control-lg fs-6" id="quantity" value="1" min="1" oninput="calculateTotal()" required>
+                        </div>
+
+                        
+                        <div class="p-3 bg-light rounded-3 mb-4 d-flex justify-content-between align-items-center">
+                            <span class="text-secondary small fw-medium">Estimated Price:</span>
+                            <span class="fw-bold fs-5 text-primary" id="totalPriceDisplay">RM 50.00</span>
+                        </div>
+
+                        
+                        <button type="submit" id="btnSubmit" class="btn btn-primary btn-lg w-100 fs-6 fw-semibold py-2">
+                            Confirm & Pay (POST)
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        
+        <div class="col-12 col-md-7">
+            <div class="card card-custom shadow-sm rounded-4 bg-white p-4 h-100">
+                <div class="card-body p-0 d-flex flex-column justify-content-between">
+                    <div>
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <h5 class="fw-bold text-dark mb-0">My Concert Ticket</h5>
+                            <button class="btn btn-sm btn-outline-secondary py-1 px-2 fs-7" onclick="loadLatestBooking()">🔄 Refresh</button>
+                        </div>
+                        <p class="text-secondary small mb-3">Live ticket pass generated from backend database.</p>
+
+                        
+                        <div id="ticketContainer"></div>
+                    </div>
+
+                    
+                    <div id="actionContainer" class="mt-3 d-none">
+                        <button class="btn btn-outline-danger w-100 fs-6 fw-semibold py-2" id="btnCancel" onclick="cancelCurrentBooking()">
+                            Cancel Ticket (PUT)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    const API_URL = 'http://localhost/events_booking/backend/bookings.php';
+    let currentBookingId = 1;
+    let currentUserId = 1;
+    let currentHolderName = 'Fikri';
+
+    document.getElementById('logoutButton').addEventListener('click', function() {
+        sessionStorage.removeItem('event_booking_token');
+        sessionStorage.removeItem('event_booking_user');
+        window.location.href = 'login.html';
+    });
+
+    
+    function calculateTotal() {
+        const eventSelect = document.getElementById('event_id');
+        const selectedOption = eventSelect.options[eventSelect.selectedIndex];
+        const price = parseFloat(selectedOption.getAttribute('data-price')) || 0;
+        const qty = parseInt(document.getElementById('quantity').value) || 0;
+        
+        const total = price * qty;
+        document.getElementById('totalPriceDisplay').innerText = `RM ${total.toFixed(2)}`;
+    }
+
+    
+    function showAlert(type, message) {
+        const alertBox = document.getElementById('alertBox');
+        alertBox.className = `alert alert-${type} alert-dismissible fade show d-flex align-items-center gap-2 mb-4 small shadow-sm`;
+        alertBox.setAttribute('role', 'alert');
+        alertBox.innerHTML = `
+            <div class="flex-grow-1">${message}</div>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close notification"></button>
+        `;
+    }
+
+    
+    function generateBarcodeSVG(codeText) {
+        return `
+            <svg class="w-100" height="38" viewBox="0 0 220 38" xmlns="http://www.w3.org/2000/svg">
+                <rect width="100%" height="100%" fill="#ffffff"/>
+                <g fill="#0f172a">
+                    <rect x="10" y="2" width="3" height="34"/><rect x="15" y="2" width="1" height="34"/>
+                    <rect x="18" y="2" width="4" height="34"/><rect x="24" y="2" width="2" height="34"/>
+                    <rect x="28" y="2" width="1" height="34"/><rect x="31" y="2" width="3" height="34"/>
+                    <rect x="36" y="2" width="2" height="34"/><rect x="40" y="2" width="5" height="34"/>
+                    <rect x="47" y="2" width="1" height="34"/><rect x="50" y="2" width="3" height="34"/>
+                    <rect x="55" y="2" width="2" height="34"/><rect x="59" y="2" width="1" height="34"/>
+                    <rect x="62" y="2" width="4" height="34"/><rect x="68" y="2" width="2" height="34"/>
+                    <rect x="72" y="2" width="3" height="34"/><rect x="77" y="2" width="1" height="34"/>
+                    <rect x="80" y="2" width="4" height="34"/><rect x="86" y="2" width="2" height="34"/>
+                    <rect x="90" y="2" width="1" height="34"/><rect x="93" y="2" width="3" height="34"/>
+                    <rect x="98" y="2" width="2" height="34"/><rect x="102" y="2" width="4" height="34"/>
+                    <rect x="108" y="2" width="1" height="34"/><rect x="111" y="2" width="3" height="34"/>
+                    <rect x="116" y="2" width="2" height="34"/><rect x="120" y="2" width="4" height="34"/>
+                    <rect x="126" y="2" width="1" height="34"/><rect x="129" y="2" width="3" height="34"/>
+                    <rect x="134" y="2" width="2" height="34"/><rect x="138" y="2" width="4" height="34"/>
+                    <rect x="144" y="2" width="1" height="34"/><rect x="147" y="2" width="3" height="34"/>
+                    <rect x="152" y="2" width="2" height="34"/><rect x="156" y="2" width="1" height="34"/>
+                    <rect x="159" y="2" width="4" height="34"/><rect x="165" y="2" width="2" height="34"/>
+                    <rect x="169" y="2" width="3" height="34"/><rect x="174" y="2" width="1" height="34"/>
+                    <rect x="177" y="2" width="4" height="34"/><rect x="183" y="2" width="2" height="34"/>
+                    <rect x="187" y="2" width="3" height="34"/><rect x="192" y="2" width="1" height="34"/>
+                    <rect x="195" y="2" width="4" height="34"/><rect x="201" y="2" width="2" height="34"/>
+                    <rect x="205" y="2" width="4" height="34"/>
+                </g>
+            </svg>
+        `;
+    }
+
+    
+    function renderTicket(data) {
+        const ticketContainer = document.getElementById('ticketContainer');
+        const actionContainer = document.getElementById('actionContainer');
+
+        currentBookingId = data.booking_id || data.id || currentBookingId;
+        currentUserId = data.user_id || currentUserId;
+        currentHolderName = data.holder_name || (currentUserId === 1 ? 'Fikri' : 'Ticket holder');
+        const statusVal = (data.booking_status || data.status || 'Confirmed').toString();
+        const isConfirmed = (statusVal.toLowerCase() === 'confirmed');
+
+        const statusBadge = isConfirmed 
+            ? '<span class="badge bg-success text-white px-3 py-1 rounded-pill">✓ VALID ENTRY</span>'
+            : '<span class="badge bg-danger text-white px-3 py-1 rounded-pill">✕ CANCELLED PASS</span>';
+
+        const bookingCode = `BKG-2026-${String(currentBookingId).padStart(4, '0')}`;
+
+        ticketContainer.innerHTML = `
+            <div class="ticket-stub text-start">
+                <!-- Ticket Header -->
+                <div class="ticket-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <span class="badge bg-primary-subtle text-primary fw-semibold px-2 py-1 rounded mb-1" style="font-size:0.7rem;">OFFICIAL CONCERT PASS</span>
+                        <h5 class="fw-bold mb-0 text-white">Konsert Live 2026</h5>
+                    </div>
+                    <div class="text-end">
+                        ${statusBadge}
+                    </div>
+                </div>
+
+                <!-- Ticket Body -->
+                <div class="ticket-body">
+                    <div class="row g-3 mb-2">
+                        <div class="col-6">
+                            <span class="text-secondary small d-block">Booking Reference</span>
+                            <strong class="text-dark fs-6">${bookingCode}</strong>
+                        </div>
+                        <div class="col-6">
+                            <span class="text-secondary small d-block">User / Holder ID</span>
+                            <strong class="text-dark fs-6">User #${currentUserId} (${currentHolderName})</strong>
+                        </div>
+                        <div class="col-6">
+                            <span class="text-secondary small d-block">Ticket Quantity</span>
+                            <strong class="text-dark fs-6">${data.quantity || 1} Ticket(s)</strong>
+                        </div>
+                        <div class="col-6">
+                            <span class="text-secondary small d-block">Total Paid</span>
+                            <strong class="text-primary fs-6">RM ${parseFloat(data.total_price || data.price || 50).toFixed(2)}</strong>
+                        </div>
+                    </div>
+
+                    <!-- Dashed Tear-Off Divider with Side Cut-Out Notches -->
+                    <div class="ticket-divider"></div>
+
+                    <!-- Barcode & Gate Scan Area -->
+                    <div class="barcode-box text-center">
+                        <span class="text-muted fw-semibold uppercase d-block mb-1" style="font-size:0.68rem; letter-spacing: 1px;">
+                            SCAN AT VENUE TURNSTILE ENTRANCE
+                        </span>
+                        ${generateBarcodeSVG(bookingCode)}
+                        <span class="text-secondary fw-mono d-block mt-1" style="font-size:0.75rem; font-family: monospace;">
+                            * ${bookingCode} *
+                        </span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        if (isConfirmed) {
+            actionContainer.classList.remove('d-none');
+        } else {
+            actionContainer.classList.add('d-none');
+        }
+    }
+
+    
+    document.getElementById('bookingForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const eventId = document.getElementById('event_id').value;
+        const quantity = parseInt(document.getElementById('quantity').value) || 1;
+        const btnSubmit = document.getElementById('btnSubmit');
+
+        btnSubmit.disabled = true;
+        btnSubmit.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Processing...';
+
+        try {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    event_id: parseInt(eventId),
+                    quantity: quantity
+                })
+            });
+
+            const text = await response.text();
+            let result = {};
+            try { result = JSON.parse(text); } catch (err) {}
+
+            if (result.success === true) {
+                showAlert('success', `<strong>Booking Confirmed!</strong> Your ticket is ready. ${result.email_message || 'Email status unavailable.'}`);
+                
+                renderTicket({
+                    booking_id: result.booking_id || result.id || (currentBookingId + 1),
+                    user_id: 1,
+                    quantity: quantity,
+                    total_price: quantity * 50,
+                    booking_status: 'Confirmed'
+                });
+            } else {
+                showAlert('danger', `<strong>Error (POST):</strong> ${result.message || 'Booking failed.'}`);
+            }
+        } catch (error) {
+            showAlert('danger', '<strong>Connection Error:</strong> Unable to reach backend REST API.');
+        } finally {
+            btnSubmit.disabled = false;
+            btnSubmit.innerText = 'Confirm & Pay (POST)';
+        }
+    });
+
+    
+    async function loadLatestBooking() {
+        try {
+            let response = await fetch(`${API_URL}?user_id=1`, { method: 'GET' });
+            if (!response.ok) {
+                response = await fetch(API_URL, { method: 'GET' });
+            }
+
+            const text = await response.text();
+            let result = {};
+            try { result = JSON.parse(text); } catch (err) {}
+
+            let list = [];
+            if (Array.isArray(result)) {
+                list = result;
+            } else if (result.data && Array.isArray(result.data)) {
+                list = result.data;
+            } else if (result.bookings && Array.isArray(result.bookings)) {
+                list = result.bookings;
+            } else if (typeof result === 'object' && result !== null && (result.booking_id || result.id)) {
+                list = [result];
+            }
+
+            if (list.length > 0) {
+                renderTicket(list[0]);
+            } else {
+                showAlert('warning', '<strong>No booking found.</strong> Please create a booking before cancelling.');
+                document.getElementById('ticketContainer').innerHTML = '';
+                document.getElementById('actionContainer').classList.add('d-none');
+            }
+        } catch (error) {
+            showAlert('danger', '<strong>Error:</strong> Unable to load the booking from the database.');
+            document.getElementById('ticketContainer').innerHTML = '';
+            document.getElementById('actionContainer').classList.add('d-none');
+        }
+    }
+
+    
+    async function cancelCurrentBooking() {
+        if (!confirm(`Are you sure you want to cancel booking BKG-2026-${String(currentBookingId).padStart(4, '0')} for User #${currentUserId} (${currentHolderName})?`)) return;
+
+        try {
+            const response = await fetch(API_URL, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    booking_id: parseInt(currentBookingId) || 1,
+                    booking_status: 'Cancelled'
+                })
+            });
+
+            const text = await response.text();
+            let result = {};
+            try { result = JSON.parse(text); } catch (e) {}
+
+            if (result.success === true) {
+                showAlert('warning', `<strong>Cancelled (PUT):</strong> Booking #${result.booking_id || currentBookingId} has been Cancelled. ${result.email_message || result.message || ''}`);
+                
+                renderTicket({
+                    booking_id: result.booking_id || currentBookingId,
+                    user_id: 1,
+                    quantity: parseInt(document.getElementById('quantity').value) || 1,
+                    total_price: (parseInt(document.getElementById('quantity').value) || 1) * 50,
+                    booking_status: 'Cancelled'
+                });
+            } else {
+                showAlert('danger', `<strong>Error (PUT):</strong> ${result.message || 'Failed to cancel.'}`);
+            }
+        } catch (error) {
+            showAlert('danger', '<strong>Error:</strong> Failed to execute PUT request.');
+        }
+    }
+
+    
+    calculateTotal();
+    loadLatestBooking();
+</script>
+
+</body>
+</html>
