@@ -98,14 +98,10 @@ $secretKey = "event_booking_system_2026_super_secure_jwt_secret_key_123456789";
 
 $issuedAt = time();
 
-$expire = $issuedAt + 3600;
-
 
 $payload = [
 
     "iat" => $issuedAt,
-
-    "exp" => $expire,
 
     "user_id" => $user["user_id"],
 

@@ -54,6 +54,9 @@ and JWT for authentication.
 - Select an available venue when creating or editing an event.
 - New events default to `published` so customers can book them. Use `draft`
   when an event should remain hidden until it is ready.
+- Venues assigned to active events are marked `In Use` automatically. They are
+  released back to `Available` when the event is cancelled, completed, or
+  deleted.
 - Monitor ticket availability.
 - View customer bookings.
 
@@ -165,9 +168,10 @@ Customers are redirected to the booking page; organiser, staff, and administrato
 accounts are redirected to the management dashboard. The login token contains
 the authenticated user's ID, email, and role.
 Booking requests use that token instead of accepting a user ID from the browser.
+The login token does not expire by time. The browser remains authenticated until
+the user logs out; the Logout button clears the stored session values.
 
-The **Logout** button clears the stored session values and redirects to the
-login page.
+The **Logout** button redirects to the login page.
 
 ## Booking Workflow
 

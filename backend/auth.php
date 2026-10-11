@@ -75,10 +75,8 @@ function authenticateUser()
 
             if ($signature === false
                 || !hash_equals($expectedSignature, $signature)
-                || !$payload
-                || !isset($payload->exp)
-                || (int) $payload->exp < time()) {
-                throw new RuntimeException("Invalid or expired token.");
+                || !$payload) {
+                throw new RuntimeException("Invalid token.");
             }
 
             $decoded = $payload;
@@ -92,7 +90,7 @@ function authenticateUser()
 
         echo json_encode([
             "success" => false,
-            "message" => "Invalid or expired token"
+            "message" => "Invalid token"
         ]);
 
         exit;

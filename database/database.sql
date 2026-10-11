@@ -31,6 +31,7 @@ CREATE TABLE venues (
     capacity INT NOT NULL,
     status ENUM(
         'Available',
+        'In Use',
         'Unavailable'
     ) DEFAULT 'Available',
 

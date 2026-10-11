@@ -36,6 +36,38 @@ function fetchVenue($conn, $venueId)
     return $stmt->fetch(PDO::FETCH_ASSOC);
 }
 
+function setVenueStatus($conn, $venueId, $status)
+{
+    $stmt = $conn->prepare("UPDATE venues SET status = ? WHERE venue_id = ?");
+    $stmt->execute([$status, $venueId]);
+}
+
+function releaseVenueIfUnused($conn, $venueId, $exceptEventId = null)
+{
+    $sql = "SELECT COUNT(*) FROM events
+            WHERE venue_id = ?
+              AND status NOT IN ('cancelled', 'completed')";
+    $params = [$venueId];
+    if ($exceptEventId !== null) {
+        $sql .= " AND event_id <> ?";
+        $params[] = $exceptEventId;
+    }
+    $stmt = $conn->prepare($sql);
+    $stmt->execute($params);
+    if ((int) $stmt->fetchColumn() === 0) {
+        setVenueStatus($conn, $venueId, "Available");
+    }
+}
+
+function syncVenueStatusForEvent($conn, $eventId, $venueId, $eventStatus)
+{
+    if (in_array($eventStatus, ["cancelled", "completed"], true)) {
+        releaseVenueIfUnused($conn, $venueId, $eventId);
+    } else {
+        setVenueStatus($conn, $venueId, "In Use");
+    }
+}
+
 // Tickets held by Pending/Confirmed bookings (Cancelled ones are released)
 function activeBookedTickets($conn, $eventId)
 {
@@ -374,6 +406,13 @@ try {
             $data["status"] ?? "draft"
         ]);
 
+        syncVenueStatusForEvent(
+            $conn,
+            $conn->lastInsertId(),
+            intval($data["venue_id"]),
+            $data["status"] ?? "draft"
+        );
+
         sendJson(201, [
             "success" => true,
             "message" => "Event created",
@@ -433,7 +472,9 @@ try {
             if (!$venue) {
                 sendJson(404, ["success" => false, "message" => "Venue not found"]);
             }
-            if (array_key_exists("venue_id", $data) && $venue["status"] !== "Available") {
+            $venueChanged = array_key_exists("venue_id", $data) &&
+                intval($event["venue_id"]) !== $newVenueId;
+            if ($venueChanged && $venue["status"] !== "Available") {
                 sendJson(409, ["success" => false, "message" => "Venue is not available"]);
             }
             if ($newTotal > intval($venue["capacity"])) {
@@ -500,10 +541,16 @@ try {
         $stmt = $conn->prepare("UPDATE events SET " . implode(", ", $sets) . " WHERE event_id = ?");
         $stmt->execute($params);
 
+        $updatedEvent = fetchEvent($conn, $id);
+        if (array_key_exists("venue_id", $data) && intval($event["venue_id"]) !== intval($newVenueId)) {
+            releaseVenueIfUnused($conn, intval($event["venue_id"]), $id);
+        }
+        syncVenueStatusForEvent($conn, $id, intval($updatedEvent["venue_id"]), $updatedEvent["status"]);
+
         sendJson(200, [
             "success" => true,
             "message" => "Event updated",
-            "data" => fetchEvent($conn, $id)
+            "data" => $updatedEvent
         ]);
     }
 
@@ -545,6 +592,7 @@ try {
 
         $stmt = $conn->prepare("DELETE FROM events WHERE event_id = ?");
         $stmt->execute([$id]);
+        releaseVenueIfUnused($conn, intval($event["venue_id"]));
 
         sendJson(200, ["success" => true, "message" => "Event deleted"]);
     }

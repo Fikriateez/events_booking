@@ -45,7 +45,7 @@ require_once __DIR__ . '/auth.php';
 /* -------------------------------------------------------------
    Helpers
 ------------------------------------------------------------- */
-const VENUE_STATUSES = ['Available', 'Unavailable'];
+const VENUE_STATUSES = ['Available', 'In Use', 'Unavailable'];
 const SORTABLE_FIELDS = ['venue_id', 'venue_name', 'location', 'capacity', 'status', 'created_at'];
 
 function respond(int $status, array $payload): void
@@ -417,6 +417,16 @@ if ($method === 'PUT' || $method === 'PATCH') {
     }
     if (empty($clean)) {
         respondError(422, "No valid fields supplied. Allowed: venue_name, location, capacity, status.");
+    }
+    if (array_key_exists('status', $clean)) {
+        $activeStmt = $conn->prepare(
+            "SELECT COUNT(*) FROM events
+             WHERE venue_id = ? AND status NOT IN ('cancelled', 'completed')"
+        );
+        $activeStmt->execute([$id]);
+        if ((int) $activeStmt->fetchColumn() > 0 && $clean['status'] !== 'In Use') {
+            respondError(409, "This venue is assigned to an active event and must remain In Use.");
+        }
     }
 
     $newName = $clean['venue_name'] ?? $existing['venue_name'];

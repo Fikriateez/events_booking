@@ -12,6 +12,7 @@
         body {
             font-family: 'Inter', sans-serif;
             background-color: #f4f6f8;
+            color: #0f172a;
         }
         .card-custom {
             border: 1px solid #e2e8f0;
@@ -82,6 +83,11 @@
             overflow-y: auto;
             padding-right: 4px;
         }
+        .btn-primary { background: #2563eb; border-color: #2563eb; }
+        .btn-primary:hover { background: #1d4ed8; border-color: #1d4ed8; }
+        .form-control, .form-select { border-color: #cbd5e1; }
+        .form-control:focus, .form-select:focus { border-color: #2563eb; box-shadow: 0 0 0 .2rem rgba(37, 99, 235, .15); }
+        .table thead th { color: #64748b; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
     </style>
 </head>
 <body class="py-5">
@@ -521,8 +527,11 @@
 
             renderBookingHistory(list);
             renderBookingPagination(result.pagination);
-            if (list.length > 0) {
-                renderTicket(list[0]);
+            const activeBookings = list.filter(booking =>
+                String(booking.booking_status || booking.status || '').toLowerCase() !== 'cancelled'
+            );
+            if (activeBookings.length > 0) {
+                renderTicket(activeBookings[0]);
             } else {
                 document.getElementById('ticketContainer').innerHTML = '';
                 document.getElementById('actionContainer').classList.add('d-none');
@@ -577,14 +586,7 @@
 
             if (result.success === true) {
                 showAlert('warning', `<strong>Cancelled (PUT):</strong> Booking #${result.booking_id || currentBookingId} has been Cancelled. ${result.email_message || result.message || ''}`);
-                
-                renderTicket({
-                    booking_id: result.booking_id || currentBookingId,
-                    user_id: currentUserId,
-                    quantity: parseInt(document.getElementById('quantity').value) || 1,
-                    total_price: (parseInt(document.getElementById('quantity').value) || 1) * 50,
-                    booking_status: 'Cancelled'
-                });
+                await loadLatestBooking();
             } else {
                 showAlert('danger', `<strong>Error (PUT):</strong> ${result.message || 'Failed to cancel.'}`);
             }
