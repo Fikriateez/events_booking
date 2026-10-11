@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Administrator Dashboard - Event Ticketing Portal</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { min-height: 100vh; font-family: Inter, sans-serif; background: #f4f6f8; }
+        .card-custom { border: 1px solid #e2e8f0; }
+        .table-responsive { max-height: 430px; }
+    </style>
+</head>
+<body class="py-4">
+<main class="container" style="max-width: 1200px;">
+    <header class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+        <div>
+            <span class="badge bg-danger-subtle text-danger fw-semibold px-3 py-2 rounded-pill mb-2">Administrator</span>
+            <h1 class="h3 fw-bold text-dark mb-1">System Administration</h1>
+            <p id="userSummary" class="text-secondary small mb-0"></p>
+        </div>
+        <div class="d-flex gap-2">
+            <a class="btn btn-outline-primary" href="user.html">Manage users</a>
+            <a class="btn btn-outline-primary" href="venues.html">Manage venues</a>
+            <button id="logoutButton" class="btn btn-outline-secondary">Logout</button>
+        </div>
+    </header>
+    <div id="alertBox" class="alert d-none" role="alert"></div>
+    <section class="row g-3 mb-4">
+        <div class="col-md-4"><div class="card card-custom shadow-sm h-100"><div class="card-body"><div class="text-secondary small">Users</div><div id="userCount" class="display-6 fw-bold">-</div></div></div></div>
+        <div class="col-md-4"><div class="card card-custom shadow-sm h-100"><div class="card-body"><div class="text-secondary small">Venues</div><div id="venueCount" class="display-6 fw-bold">-</div></div></div></div>
+        <div class="col-md-4"><div class="card card-custom shadow-sm h-100"><div class="card-body"><div class="text-secondary small">Bookings</div><div id="bookingCount" class="display-6 fw-bold">-</div></div></div></div>
+    </section>
+    <section class="card card-custom shadow-sm mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-3"><div><h2 class="h5 fw-bold mb-1">System event records</h2><p class="text-secondary small mb-0">Read-only oversight; event changes belong to Organisers and Staff.</p></div><button id="refreshButton" class="btn btn-sm btn-outline-secondary">Refresh</button></div>
+            <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Event</th><th>Organiser</th><th>Date</th><th>Status</th><th>Availability</th></tr></thead><tbody id="eventsTable"><tr><td colspan="5" class="text-secondary">Loading records...</td></tr></tbody></table></div>
+        </div>
+    </section>
+    <section class="card card-custom shadow-sm">
+        <div class="card-body"><div class="d-flex justify-content-between align-items-center mb-3"><div><h2 class="h5 fw-bold mb-1">Booking records</h2><p class="text-secondary small mb-0">System-wide booking oversight.</p></div></div>
+            <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Booking</th><th>Event</th><th>Customer</th><th>Quantity</th><th>Total</th><th>Status</th></tr></thead><tbody id="bookingsTable"><tr><td colspan="6" class="text-secondary">Loading records...</td></tr></tbody></table></div>
+        </div>
+    </section>
+</main>
+<script>
+    const API_BASE = 'http://localhost/events_booking/backend';
+    const token = sessionStorage.getItem('event_booking_token');
+    const user = JSON.parse(sessionStorage.getItem('event_booking_user') || 'null');
+    const role = String(user?.role || '').trim().toLowerCase();
+    if (!token || !user || role !== 'administrator') window.location.href = 'login.html';
+    const headers = { 'Authorization': `Bearer ${token}` };
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[char]));
+    const formatDate = value => value ? new Date(String(value).replace(' ', 'T')).toLocaleString() : '-';
+    const showAlert = (type, message) => { const box = document.getElementById('alertBox'); box.className = `alert alert-${type}`; box.textContent = message; };
+    async function loadAdminRecords() {
+        try {
+            const responses = await Promise.all([
+                fetch(`${API_BASE}/users.php`, { headers }),
+                fetch(`${API_BASE}/venues.php?page=1&limit=100`, { headers }),
+                fetch(`${API_BASE}/events.php?page=1&limit=100&sort=event_date&order=asc`, { headers }),
+                fetch(`${API_BASE}/bookings.php?page=1&limit=50`, { headers })
+            ]);
+            const results = await Promise.all(responses.map(response => response.json()));
+            if (responses.some(response => !response.ok) || results.some(result => result.success !== true)) throw new Error('Unable to load system records.');
+            const users = results[0].data || [], venues = results[1].data || [], events = results[2].data || [], bookings = results[3].data || [];
+            document.getElementById('userCount').textContent = users.length;
+            document.getElementById('venueCount').textContent = venues.length;
+            document.getElementById('bookingCount').textContent = bookings.length;
+            document.getElementById('eventsTable').innerHTML = events.length ? events.map(event => `<tr><td class="fw-semibold">${escapeHtml(event.title)}</td><td>#${escapeHtml(event.organiser_id)}</td><td>${escapeHtml(formatDate(event.event_date))}</td><td>${escapeHtml(event.status)}</td><td>${event.available_tickets} / ${event.total_tickets}</td></tr>`).join('') : '<tr><td colspan="5">No events found.</td></tr>';
+            document.getElementById('bookingsTable').innerHTML = bookings.length ? bookings.map(booking => `<tr><td>#${escapeHtml(booking.booking_id)}</td><td>${escapeHtml(booking.event_name || 'Event')}</td><td><strong>${escapeHtml(booking.customer_name || booking.email || '-')}</strong><div class="small text-secondary">${escapeHtml(booking.customer_email || booking.email || '')}</div></td><td>${escapeHtml(booking.quantity)}</td><td>RM ${Number(booking.total_price || 0).toFixed(2)}</td><td>${escapeHtml(booking.booking_status)}</td></tr>`).join('') : '<tr><td colspan="6">No bookings found.</td></tr>';
+        } catch (error) { showAlert('danger', error.message); }
+    }
+    document.getElementById('userSummary').textContent = `${user.name} (${user.role})`;
+    document.getElementById('refreshButton').addEventListener('click', loadAdminRecords);
+    document.getElementById('logoutButton').addEventListener('click', () => { sessionStorage.clear(); window.location.href = 'login.html'; });
+    loadAdminRecords();
+</script>
+</body>
+</html>

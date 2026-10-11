@@ -49,7 +49,7 @@ function activeBookedTickets($conn, $eventId)
     return (int) $stmt->fetchColumn();
 }
 
-function validateEventData($data, $isUpdate)
+function validateEventData($data, $isUpdate, $existingEventDate = null)
 {
     $errors = [];
     $statuses = ["draft", "published", "cancelled", "completed"];
@@ -88,7 +88,11 @@ function validateEventData($data, $isUpdate)
     if ($check("event_date")) {
         $date = $data["event_date"] ?? null;
         $ts = is_string($date) ? strtotime($date) : false;
-        if ($ts === false || $ts <= time()) {
+        $isUnchangedExistingDate = $isUpdate &&
+            $existingEventDate !== null &&
+            $ts !== false &&
+            strtotime($existingEventDate) === $ts;
+        if ($ts === false || ($ts <= time() && !$isUnchangedExistingDate)) {
             $errors[] = [
                 "field" => "event_date",
                 "message" => "event_date must be a valid future date (YYYY-MM-DD HH:MM:SS)"
@@ -132,7 +136,7 @@ $method = $_SERVER["REQUEST_METHOD"];
 
 $id = isset($_GET["id"]) ? intval($_GET["id"]) : null;
 
-$manageRoles = ["Administrator", "Organiser", "Staff"];
+$manageRoles = ["Organiser", "Staff"];
 
 try {
 
@@ -314,7 +318,7 @@ try {
 
     if ($method === "POST") {
 
-        requireRole($currentUser, $manageRoles);   // 403 for Customer
+        requireRole($currentUser, $manageRoles);   // 403 for Administrator and Customer
 
         $data = json_decode(file_get_contents("php://input"), true);
 
@@ -395,9 +399,9 @@ try {
             sendJson(404, ["success" => false, "message" => "Event not found"]);
         }
 
-        // Administrator can edit any event, others only their own
+        // Organisers manage their own events; staff can manage all events.
         if (
-            $currentUser->role !== "Administrator" &&
+            $currentUser->role === "Organiser" &&
             intval($event["organiser_id"]) !== intval($currentUser->user_id)
         ) {
             sendJson(403, ["success" => false, "message" => "You can only modify your own events"]);
@@ -409,7 +413,7 @@ try {
             sendJson(400, ["success" => false, "message" => "Invalid JSON in request body"]);
         }
 
-        $errors = validateEventData($data, true);
+        $errors = validateEventData($data, true, $event["event_date"]);
 
         if (!empty($errors)) {
             sendJson(400, ["success" => false, "message" => "Validation failed", "errors" => $errors]);
@@ -522,7 +526,7 @@ try {
         }
 
         if (
-            $currentUser->role !== "Administrator" &&
+            $currentUser->role === "Organiser" &&
             intval($event["organiser_id"]) !== intval($currentUser->user_id)
         ) {
             sendJson(403, ["success" => false, "message" => "You can only delete your own events"]);

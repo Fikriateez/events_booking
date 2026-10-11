@@ -42,6 +42,15 @@ CREATE TABLE venues (
         ON UPDATE CURRENT_TIMESTAMP
 );
 
+INSERT INTO venues
+    (venue_name, location, capacity, status)
+VALUES
+    ('Merdeka Hall', 'Kuala Lumpur', 1000, 'Available'),
+    ('Putra Arena', 'Putrajaya', 2500, 'Available'),
+    ('Shah Alam Convention Centre', 'Shah Alam', 1500, 'Available'),
+    ('Penang International Hall', 'George Town', 1800, 'Available'),
+    ('Johor Event Centre', 'Johor Bahru', 1200, 'Unavailable');
+
 
 /* =====================================
    EVENTS TABLE

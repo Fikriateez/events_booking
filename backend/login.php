@@ -51,41 +51,32 @@ $data = json_decode(
 );
 
 $email = trim($data["email"] ?? "");
-$username = trim($data["username"] ?? "");
 $password = $data["password"] ?? "";
 
-if (($email === "" && $username === "") || $password === "") {
+if ($email === "" || $password === "") {
 
     http_response_code(400);
 
     echo json_encode([
         "success" => false,
-        "message" => "Username/email and password are required"
+        "message" => "Email and password are required"
     ]);
 
     exit;
 }
 
-$user = null;
+$stmt = $conn->prepare(
+    "SELECT * FROM users WHERE email = ? LIMIT 1"
+);
+$stmt->execute([$email]);
+$user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-// Demo administrator account requested for the frontend login page.
-if ($username === "admin" && hash_equals("admin123", $password)) {
-    $user = [
-        "user_id" => 0,
-        "name" => "Administrator",
-        "email" => "admin@eventbooking.local",
-        "role" => "Administrator"
-    ];
-} else {
-    $stmt = $conn->prepare(
-        "SELECT * FROM users WHERE email = ?"
-    );
-    $stmt->execute([$email]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+$passwordMatches = $user
+    && (password_verify($password, $user["password"])
+        || hash_equals((string) $user["password"], (string) $password));
 
-    if (!$user || !password_verify($password, $user["password"])) {
-        $user = null;
-    }
+if (!$passwordMatches) {
+    $user = null;
 }
 
 if (!$user) {

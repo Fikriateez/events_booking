@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Events - Event Ticketing Portal</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { min-height: 100vh; font-family: Inter, sans-serif; background: #f4f6f8; }
+        .card-custom { border: 1px solid #e2e8f0; }
+        .table-responsive { max-height: 520px; }
+    </style>
+</head>
+<body class="py-4">
+<main class="container" style="max-width: 1250px;">
+    <nav class="d-flex justify-content-between align-items-center mb-4">
+        <a id="dashboardLink" class="btn btn-outline-secondary" href="dashboard.html">Dashboard</a>
+        <div class="d-flex gap-2">
+            <a class="btn btn-outline-primary" href="user.html">My account</a>
+            <button id="logoutButton" class="btn btn-outline-secondary">Logout</button>
+        </div>
+    </nav>
+    <div class="d-flex justify-content-between align-items-end mb-4">
+        <div><span class="badge bg-primary-subtle text-primary mb-2">Events</span><h1 class="h3 fw-bold mb-1">Event Management</h1><p id="userSummary" class="text-secondary small mb-0"></p></div>
+        <button id="newEventButton" class="btn btn-primary d-none" data-bs-toggle="modal" data-bs-target="#eventModal">Create event</button>
+    </div>
+    <div id="alertBox" class="alert d-none" role="alert"></div>
+    <section class="card card-custom shadow-sm">
+        <div class="card-body">
+            <div class="row g-2 mb-3">
+                <div class="col-md-6"><input id="searchInput" class="form-control" placeholder="Search events"></div>
+                <div class="col-md-3"><select id="statusFilter" class="form-select"><option value="">All statuses</option><option>draft</option><option>published</option><option>cancelled</option><option>completed</option></select></div>
+                <div class="col-md-3"><button id="refreshButton" class="btn btn-outline-secondary w-100">Refresh</button></div>
+            </div>
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead><tr><th>Title</th><th>Date</th><th>Venue</th><th>Status</th><th>Tickets</th><th class="text-end">Actions</th></tr></thead>
+                    <tbody id="eventsTable"><tr><td colspan="6" class="text-secondary">Loading events...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</main>
+<div class="modal fade" id="eventModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg"><div class="modal-content">
+        <form id="eventForm">
+            <div class="modal-header"><h2 id="modalTitle" class="modal-title h5">Create event</h2><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <input id="eventId" type="hidden">
+                <div class="row g-3">
+                    <div class="col-md-8"><label class="form-label">Title</label><input id="title" class="form-control" minlength="3" maxlength="150" required></div>
+                    <div class="col-md-4"><label for="status" class="form-label">Status</label><select id="status" class="form-select"><option value="published">Published - visible to customers</option><option value="draft">Draft - hidden from customers</option><option value="cancelled">Cancelled</option><option value="completed">Completed</option></select></div>
+                    <div class="col-12"><label class="form-label">Description</label><textarea id="description" class="form-control" rows="2"></textarea></div>
+                    <div class="col-md-6"><label for="venueId" class="form-label">Venue</label><select id="venueId" class="form-select" required><option value="">Choose an available venue...</option></select></div>
+                    <div class="col-md-6"><label class="form-label">Event date</label><input id="eventDate" class="form-control" type="datetime-local" required></div>
+                    <div class="col-md-6"><label class="form-label">Ticket price (RM)</label><input id="ticketPrice" class="form-control" type="number" min="0" step="0.01" required></div>
+                    <div class="col-md-6"><label class="form-label">Total tickets</label><input id="totalTickets" class="form-control" type="number" min="1" required></div>
+                </div>
+            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button class="btn btn-primary">Save event</button></div>
+        </form>
+    </div></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const API = 'http://localhost/events_booking/backend/events.php';
+    const token = sessionStorage.getItem('event_booking_token');
+    const user = JSON.parse(sessionStorage.getItem('event_booking_user') || 'null');
+    const role = String(user?.role || '').trim().toLowerCase();
+    if (!token || !user || role === 'customer') {
+        window.location.href = 'login.html';
+    } else {
+    const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+    if (role === 'administrator') document.getElementById('dashboardLink').href = 'admin-dashboard.html';
+    const modal = new bootstrap.Modal(document.getElementById('eventModal'));
+    const currentUserId = Number(user.user_id);
+    let venues = [];
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[char]));
+    const showAlert = (type, message) => { const box = document.getElementById('alertBox'); box.className = `alert alert-${type}`; box.textContent = message; };
+    const formatDate = value => value ? new Date(String(value).replace(' ', 'T')).toLocaleString() : '-';
+    const toInputDate = value => value ? String(value).replace(' ', 'T').slice(0, 16) : '';
+
+    async function loadEvents() {
+        const search = encodeURIComponent(document.getElementById('searchInput').value.trim());
+        const statusValue = document.getElementById('statusFilter').value;
+        const status = statusValue ? `&status=${encodeURIComponent(statusValue)}` : '';
+        try {
+            const response = await fetch(`${API}?page=1&limit=100&sort=event_date&order=asc&search=${search}${status}`, { headers });
+            const result = await response.json();
+            if (!response.ok || result.success !== true) throw new Error(result.message || 'Unable to load events.');
+            const events = result.data || [];
+            document.getElementById('eventsTable').innerHTML = events.length ? events.map(event => `
+                <tr><td><strong>${escapeHtml(event.title)}</strong><div class="small text-secondary">${escapeHtml(event.description || '')}</div></td>
+                <td>${escapeHtml(formatDate(event.event_date))}</td><td>${escapeHtml(event.venue_name)}</td>
+                <td><span class="badge text-bg-secondary">${escapeHtml(event.status)}</span></td>
+                <td>${event.available_tickets} / ${event.total_tickets}</td>                <td class="text-end text-nowrap">${canManageEvent(event) ? `
+                <button class="btn btn-sm btn-outline-primary" onclick="editEvent(${event.event_id})">Edit</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteEvent(${event.event_id})">Delete</button>` : '<span class="text-secondary small">View only</span>'}</td></tr>
+            `).join('') : '<tr><td colspan="6" class="text-secondary">No events found.</td></tr>';
+        } catch (error) { showAlert('danger', error.message); }
+    }
+    function canManageEvent(event) {
+        return role === 'staff' || (role === 'organiser' && Number(event.organiser_id) === currentUserId);
+    }
+    async function loadVenues() {
+        const select = document.getElementById('venueId');
+        try {
+            const response = await fetch('http://localhost/events_booking/backend/venues.php?page=1&limit=100&sort=venue_name&order=asc', { headers });
+            const result = await response.json();
+            if (!response.ok || result.success !== true) throw new Error(result.message || 'Unable to load venues.');
+            venues = result.data || [];
+            const availableVenues = venues.filter(venue => venue.status === 'Available');
+            select.innerHTML = venues.length
+                ? '<option value="">Choose an available venue...</option>' + venues.map(venue => `<option value="${venue.venue_id}" ${venue.status !== 'Available' ? 'disabled' : ''}>${escapeHtml(venue.venue_name)} - ${escapeHtml(venue.location)} (${Number(venue.capacity).toLocaleString()} seats)${venue.status !== 'Available' ? ' - Unavailable' : ''}</option>`).join('')
+                : '<option value="">No available venues</option>';
+            document.getElementById('newEventButton').disabled = availableVenues.length === 0;
+        } catch (error) {
+            select.innerHTML = '<option value="">Unable to load venues</option>';
+            document.getElementById('newEventButton').disabled = true;
+            showAlert('danger', error.message);
+        }
+    }
+    function resetForm(event = null) {
+        document.getElementById('eventForm').reset();
+        document.getElementById('eventId').value = event?.event_id || '';
+        document.getElementById('modalTitle').textContent = event ? 'Edit event' : 'Create event';
+        if (event) {
+            document.getElementById('title').value = event.title;
+            document.getElementById('description').value = event.description || '';
+            document.getElementById('status').value = event.status;
+            const venueSelect = document.getElementById('venueId');
+            let venueOption = Array.from(venueSelect.options).find(option => option.value === String(event.venue_id));
+            if (!venueOption) {
+                venueOption = new Option(`${event.venue_name || 'Current venue'} - unavailable`, event.venue_id);
+                venueSelect.add(venueOption);
+            }
+            venueOption.disabled = false;
+            venueSelect.value = event.venue_id;
+            document.getElementById('eventDate').value = toInputDate(event.event_date);
+            document.getElementById('ticketPrice').value = event.ticket_price;
+            document.getElementById('totalTickets').value = event.total_tickets;
+        }
+    }
+    async function editEvent(id) {
+        const response = await fetch(`${API}?id=${id}`, { headers });
+        const result = await response.json();
+        if (!response.ok || result.success !== true) return showAlert('danger', result.message || 'Unable to load event.');
+        resetForm(result.data); modal.show();
+    }
+    async function deleteEvent(id) {
+        if (!confirm('Delete this event? Events with booking records cannot be deleted.')) return;
+        const response = await fetch(`${API}?id=${id}`, { method: 'DELETE', headers });
+        const result = await response.json();
+        if (!response.ok || result.success !== true) return showAlert('danger', result.message || 'Unable to delete event.');
+        showAlert('success', result.message); loadEvents();
+    }
+    // The table uses inline handlers, so expose only these guarded actions.
+    window.editEvent = editEvent;
+    window.deleteEvent = deleteEvent;
+    document.getElementById('eventForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        const id = document.getElementById('eventId').value;
+        const data = { title: document.getElementById('title').value.trim(), description: document.getElementById('description').value.trim(), venue_id: Number(document.getElementById('venueId').value), event_date: document.getElementById('eventDate').value.replace('T', ' ') + ':00', ticket_price: Number(document.getElementById('ticketPrice').value), total_tickets: Number(document.getElementById('totalTickets').value), status: document.getElementById('status').value };
+        const response = await fetch(id ? `${API}?id=${id}` : API, { method: id ? 'PUT' : 'POST', headers, body: JSON.stringify(data) });
+        const result = await response.json();
+        if (!response.ok || result.success !== true) return showAlert('danger', result.message || 'Unable to save event.');
+        modal.hide(); showAlert('success', result.message); loadEvents();
+    });
+    document.getElementById('newEventButton').addEventListener('click', () => resetForm());
+    document.getElementById('newEventButton').classList.toggle('d-none', !['organiser', 'staff'].includes(role));
+    document.getElementById('refreshButton').addEventListener('click', loadEvents);
+    document.getElementById('searchInput').addEventListener('input', loadEvents);
+    document.getElementById('statusFilter').addEventListener('change', loadEvents);
+    document.getElementById('userSummary').textContent = `${user?.name || 'Authenticated user'} (${user?.role || 'Unknown role'})`;
+    document.getElementById('logoutButton').addEventListener('click', () => { sessionStorage.clear(); window.location.href = 'login.html'; });
+    loadVenues();
+    loadEvents();
+    }
+</script>
+</body>
+</html>

@@ -38,17 +38,22 @@ and JWT for authentication.
 - Booking confirmation email.
 - Booking cancellation email.
 - Bootstrap 5 alerts and responsive layouts.
+- Administrator venue management with search, filtering, pagination, and CRUD operations.
 
 ## User Roles
 
 ### Administrator
 
-- Manage users, events, venues, and bookings.
+- Manage users and venues.
 - View booking and ticket availability information.
 
 ### Organiser or Staff
 
-- Manage event information.
+- Create and manage event information. Organisers can edit and delete events
+  assigned to their account; Staff can manage all events.
+- Select an available venue when creating or editing an event.
+- New events default to `published` so customers can book them. Use `draft`
+  when an event should remain hidden until it is ready.
 - Monitor ticket availability.
 - View customer bookings.
 
@@ -60,6 +65,14 @@ and JWT for authentication.
 - View the latest booking.
 - Cancel a booking.
 
+### Venue API
+
+The venue resource is available at `/backend/venues.php`. All authenticated
+roles can list and view venues. Only Administrators can create, update, or
+delete venues. The API validates venue name, location, capacity, and status,
+and prevents deletion when events are still assigned to a venue. The
+Bootstrap frontend is available at `frond_end/venues.html`.
+
 ## Project Structure
 
 ```text
@@ -70,11 +83,17 @@ events_booking/
 │   ├── db.php             # MySQL PDO connection
 │   ├── events.php         # Event API
 │   └── login.php          # Login API
+│   └── users.php          # User listing and administration API
 ├── database/
 │   └── database.sql       # Database schema and sample data
 ├── frond_end/
 │   ├── booking.html       # Customer booking page
-│   └── login.html         # Login page
+│   ├── dashboard.html     # Organiser, staff, and administrator dashboard
+├── admin-dashboard.html # Administrator-only oversight dashboard
+│   ├── events.html        # Bootstrap event management page
+│   ├── login.html         # Login page
+│   ├── venues.html        # Bootstrap venue management page
+│   └── user.html          # Account and administrator user-management page
 ├── vendor/
 │   ├── composer.json      # PHP dependency definition
 │   └── composer.lock      # Locked dependency versions
@@ -131,15 +150,21 @@ events_booking/
 
 ## Login
 
-The current demo credentials are:
+Any user in the exported `users` table can sign in.
+For example:
 
 ```text
-Username: admin
-Password: admin123
+Email: kl2508019931@student.uptm.edu.my
+Password: Fikri123
 ```
 
 After a successful login, the authentication token is stored in
 `sessionStorage` and the user is redirected to the booking page.
+
+Customers are redirected to the booking page; organiser, staff, and administrator
+accounts are redirected to the management dashboard. The login token contains
+the authenticated user's ID, email, and role.
+Booking requests use that token instead of accepting a user ID from the browser.
 
 The **Logout** button clears the stored session values and redirects to the
 login page.
@@ -167,7 +192,7 @@ The backend then:
 The booking page requests the latest booking from the database:
 
 ```http
-GET /events_booking/backend/bookings.php?user_id=1
+GET /events_booking/backend/bookings.php
 ```
 
 The latest booking is loaded from persistent database data. A cancelled booking
@@ -202,8 +227,42 @@ The backend then:
 ### Get the latest booking
 
 ```http
-GET /backend/bookings.php?user_id=1
+GET /backend/bookings.php?page=1&limit=10&search=concert&status=Confirmed
 ```
+
+All booking requests must include the token returned by the login API:
+
+```http
+Authorization: Bearer <token>
+```
+
+The booking confirmation and cancellation emails are sent to the email
+address of the authenticated user loaded from `users.email`. For example,
+logging in as `kl2508019931@student.uptm.edu.my` sends notifications to that
+address.
+
+For customers, the response includes the customer's booking history. Organisers
+see bookings for events they own, while staff and administrators can monitor all
+bookings. Every response also includes pagination metadata:
+
+```json
+{
+  "success": true,
+  "data": [],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 0,
+    "totalPages": 0,
+    "search": "concert",
+    "status": "Confirmed"
+  }
+}
+```
+
+Customers can search their own bookings by event title or booking number and
+filter by `Pending`, `Confirmed`, or `Cancelled` status. Results are paginated
+with a maximum page size of 50.
 
 ### Create a booking
 

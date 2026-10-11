@@ -17,6 +17,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 
 require_once 'db.php'; 
+require_once 'auth.php';
+
+function sendBookingJson($statusCode, $body)
+{
+    http_response_code($statusCode);
+    echo json_encode($body);
+    exit;
+}
 
 
 function sendSendGridEmail($toEmail, $subject, $htmlContent) {
@@ -113,33 +121,104 @@ $method = $_SERVER['REQUEST_METHOD'];
 
 if ($method === 'GET') {
     try {
-        $userId = $_GET['user_id'] ?? 1;
-        
+        $currentUser = authenticateUser();
+        $userId = (int) $currentUser->user_id;
+        $role = (string) $currentUser->role;
+        requireRole($currentUser, ['Customer', 'Organiser', 'Staff', 'Administrator']);
+
+        $page = filter_var($_GET['page'] ?? 1, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1]
+        ]);
+        $limit = filter_var($_GET['limit'] ?? 10, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1, 'max_range' => 50]
+        ]);
+        if ($page === false || $limit === false) {
+            sendBookingJson(400, [
+                'success' => false,
+                'message' => 'page must be at least 1 and limit must be between 1 and 50.'
+            ]);
+        }
+
+        $search = trim((string) ($_GET['search'] ?? ''));
+        $status = trim((string) ($_GET['status'] ?? ''));
+        $allowedStatuses = ['Pending', 'Confirmed', 'Cancelled'];
+        if ($status !== '' && !in_array($status, $allowedStatuses, true)) {
+            sendBookingJson(400, [
+                'success' => false,
+                'message' => 'status must be Pending, Confirmed, or Cancelled.'
+            ]);
+        }
+
+        if ($role === 'Customer') {
+            $where = ['b.user_id = ?'];
+            $params = [$userId];
+        } elseif ($role === 'Organiser') {
+            $where = ['e.organiser_id = ?'];
+            $params = [$userId];
+        } else {
+            $where = ['1 = 1'];
+            $params = [];
+        }
+        if ($search !== '') {
+            $where[] = '(e.title LIKE ? OR CAST(b.booking_id AS CHAR) LIKE ?)';
+            $params[] = "%{$search}%";
+            $params[] = "%{$search}%";
+        }
+        if ($status !== '') {
+            $where[] = 'b.booking_status = ?';
+            $params[] = $status;
+        }
+        $whereSql = implode(' AND ', $where);
+
+        $countStmt = $conn->prepare(
+            "SELECT COUNT(*) FROM bookings b
+             LEFT JOIN events e ON b.event_id = e.event_id
+             WHERE {$whereSql}"
+        );
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+        $offset = ($page - 1) * $limit;
+
         $stmt = $conn->prepare("
-            SELECT b.*, e.title AS event_name, u.email 
+            SELECT b.*, e.title AS event_name, e.event_date,
+                   u.name AS customer_name, u.email AS customer_email
             FROM bookings b 
             LEFT JOIN events e ON b.event_id = e.event_id 
             LEFT JOIN users u ON b.user_id = u.user_id 
-            WHERE b.user_id = ?
-              AND b.booking_id = (
-                  SELECT MAX(latest.booking_id)
-                  FROM bookings latest
-                  WHERE latest.user_id = ?
-              )
-              AND b.booking_status <> 'Cancelled'
+            WHERE {$whereSql}
             ORDER BY b.booking_id DESC
+            LIMIT {$limit} OFFSET {$offset}
         ");
-        $stmt->execute([$userId, $userId]);
+        $stmt->execute($params);
         $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        echo json_encode([
+        $userStmt = $conn->prepare(
+            "SELECT user_id, name, email, role FROM users WHERE user_id = ?"
+        );
+        $userStmt->execute([$userId]);
+        $user = $userStmt->fetch(PDO::FETCH_ASSOC) ?: [
+            "user_id" => $userId,
+            "name" => $currentUser->name ?? "",
+            "email" => $currentUser->email ?? "",
+            "role" => $role
+        ];
+
+        sendBookingJson(200, [
             "success" => true,
-            "data" => $bookings
+            "data" => $bookings,
+            "user" => $user,
+            "pagination" => [
+                "page" => (int) $page,
+                "limit" => (int) $limit,
+                "total" => $total,
+                "totalPages" => (int) ceil($total / $limit),
+                "search" => $search,
+                "status" => $status
+            ]
         ]);
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
         error_log('Booking GET failed: ' . $e->getMessage());
-        http_response_code(500);
-        echo json_encode([
+        sendBookingJson(500, [
             "success" => false,
             "message" => "Unable to load bookings from the database."
         ]);
@@ -149,21 +228,58 @@ if ($method === 'GET') {
 
 
 if ($method === 'POST') {
+    $currentUser = authenticateUser();
+    requireRole($currentUser, ['Customer']);
     $rawInput = file_get_contents("php://input");
     $data = json_decode($rawInput, true);
 
-    $eventId = $data['event_id'] ?? 1;
-    $quantity = $data['quantity'] ?? 1;
-    $userId = 1; 
+    if (!is_array($data)) {
+        sendBookingJson(400, [
+            "success" => false,
+            "message" => "Request body must be valid JSON."
+        ]);
+    }
+
+    $eventId = filter_var($data['event_id'] ?? null, FILTER_VALIDATE_INT, [
+        'options' => ['min_range' => 1]
+    ]);
+    $quantity = filter_var($data['quantity'] ?? null, FILTER_VALIDATE_INT, [
+        'options' => ['min_range' => 1, 'max_range' => 10]
+    ]);
+    $userId = (int) $currentUser->user_id;
+
+    if ($eventId === false || $quantity === false) {
+        sendBookingJson(400, [
+            "success" => false,
+            "message" => "event_id must be a positive integer and quantity must be between 1 and 10."
+        ]);
+    }
 
     try {
-        $eventStmt = $conn->prepare("SELECT * FROM events WHERE event_id = ?");
-        $eventStmt->execute([$eventId]);
+        $eventStmt = $conn->prepare(
+            "SELECT * FROM events
+             WHERE event_id = ? AND status = 'published' AND available_tickets >= ?"
+        );
+        $eventStmt->execute([$eventId, $quantity]);
         $event = $eventStmt->fetch(PDO::FETCH_ASSOC);
 
-        $eventName = $event['event_name'] ?? 'Konsert Live 2026';
-        $ticketPrice = $event['ticket_price'] ?? 50.00;
+        if (!$event) {
+            sendBookingJson(409, [
+                "success" => false,
+                "message" => "Event is unavailable or does not have enough tickets."
+            ]);
+        }
+
+        $eventName = $event['title'];
+        $ticketPrice = (float) $event['ticket_price'];
         $totalPrice = $ticketPrice * $quantity;
+
+        $userStmt = $conn->prepare("SELECT email FROM users WHERE user_id = ?");
+        $userStmt->execute([$userId]);
+        $user = $userStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$user) {
+            throw new RuntimeException("Authenticated user was not found.");
+        }
 
        
         try {
@@ -182,7 +298,7 @@ if ($method === 'POST') {
             $updateStmt->execute([$quantity, $eventId]);
         } catch (Exception $ex) {}
 
-        $userEmail = 'kl2508019931@student.uptm.edu.my';
+        $userEmail = $user['email'];
 
        
         $subject = "Ticket Booking Confirmation - #" . $bookingId;
@@ -209,52 +325,71 @@ if ($method === 'POST') {
         ];
         sendResponseThenEmail($response, $userEmail, $subject, $htmlContent);
 
-    } catch (Exception $e) {
-        echo json_encode(["success" => false, "message" => "Transaction error: " . $e->getMessage()]);
+    } catch (Throwable $e) {
+        error_log('Booking POST failed: ' . $e->getMessage());
+        sendBookingJson(500, [
+            "success" => false,
+            "message" => "Unable to create booking."
+        ]);
     }
     exit;
 }
 
 
 if ($method === 'PUT') {
+    $currentUser = authenticateUser();
+    requireRole($currentUser, ['Customer']);
+    $userId = (int) $currentUser->user_id;
     $rawInput = file_get_contents("php://input");
     $data = json_decode($rawInput, true);
+
+    if (!is_array($data)) {
+        sendBookingJson(400, [
+            "success" => false,
+            "message" => "Request body must be valid JSON."
+        ]);
+    }
 
     $bookingId = $data['booking_id'] ?? null;
     $bookingStatus = $data['booking_status'] ?? 'Cancelled';
 
+    if (filter_var($bookingId, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false
+        || $bookingStatus !== 'Cancelled') {
+        sendBookingJson(400, [
+            "success" => false,
+            "message" => "booking_id must be a positive integer and booking_status must be Cancelled."
+        ]);
+    }
+
     try {
         $booking = null;
         if ($bookingId) {
-            $stmt = $conn->prepare("SELECT * FROM bookings WHERE booking_id = ?");
-            $stmt->execute([$bookingId]);
+            $stmt = $conn->prepare("SELECT * FROM bookings WHERE booking_id = ? AND user_id = ?");
+            $stmt->execute([$bookingId, $userId]);
             $booking = $stmt->fetch(PDO::FETCH_ASSOC);
         }
 
-        // Fallback to latest record in database
         if (!$booking) {
-            $stmt = $conn->query("SELECT * FROM bookings ORDER BY booking_id DESC LIMIT 1");
+            $stmt = $conn->prepare("SELECT * FROM bookings WHERE user_id = ? ORDER BY booking_id DESC LIMIT 1");
+            $stmt->execute([$userId]);
             $booking = $stmt->fetch(PDO::FETCH_ASSOC);
             if ($booking) {
                 $bookingId = $booking['booking_id'];
             }
         }
 
-        
         if (!$booking) {
-            try {
-                $conn->query("INSERT INTO bookings (user_id, event_id, quantity, total_price, booking_status) VALUES (1, 1, 1, 50.00, 'Confirmed')");
-            } catch (Exception $ex) {
-                $conn->query("INSERT INTO bookings (user_id, event_id, quantity, total_price, status) VALUES (1, 1, 1, 50.00, 'Confirmed')");
-            }
-            $bookingId = $conn->lastInsertId();
-            $booking = [
-                'booking_id' => $bookingId,
-                'user_id' => 1,
-                'event_id' => 1,
-                'quantity' => 1,
-                'total_price' => 50.00
-            ];
+            sendBookingJson(404, [
+                "success" => false,
+                "message" => "Booking not found for the authenticated user."
+            ]);
+        }
+
+        if (strtolower($booking['booking_status']) === 'cancelled') {
+            sendBookingJson(409, [
+                "success" => false,
+                "message" => "This booking has already been cancelled."
+            ]);
         }
 
         
@@ -274,8 +409,16 @@ if ($method === 'PUT') {
             } catch (Exception $ex) {}
         }
 
-        $userEmail = 'kl2508019931@student.uptm.edu.my';
-        $eventName = 'Konsert Live 2026';
+        $userStmt = $conn->prepare("SELECT email FROM users WHERE user_id = ?");
+        $userStmt->execute([$userId]);
+        $user = $userStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$user) {
+            throw new RuntimeException("Authenticated user was not found.");
+        }
+        $userEmail = $user['email'];
+        $eventStmt = $conn->prepare("SELECT title FROM events WHERE event_id = ?");
+        $eventStmt->execute([$booking['event_id']]);
+        $eventName = $eventStmt->fetchColumn() ?: 'Event';
 
         
         $subject = "Booking Cancellation Notice - #" . $bookingId;
@@ -301,8 +444,12 @@ if ($method === 'PUT') {
         ];
         sendResponseThenEmail($response, $userEmail, $subject, $htmlContent);
 
-    } catch (Exception $e) {
-        echo json_encode(["success" => false, "message" => "Update error: " . $e->getMessage()]);
+    } catch (Throwable $e) {
+        error_log('Booking PUT failed: ' . $e->getMessage());
+        sendBookingJson(500, [
+            "success" => false,
+            "message" => "Unable to cancel booking."
+        ]);
     }
     exit;
 }

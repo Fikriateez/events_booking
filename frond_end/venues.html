@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Venues - Event Ticketing Portal</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { min-height: 100vh; font-family: Inter, sans-serif; background: #f4f6f8; }
+        .card-custom { border: 1px solid #e2e8f0; }
+        .table-responsive { max-height: 520px; }
+    </style>
+</head>
+<body class="py-4">
+<main class="container" style="max-width: 1200px;">
+    <nav class="d-flex justify-content-between align-items-center mb-4">
+        <a id="dashboardLink" class="btn btn-outline-secondary" href="dashboard.html">Dashboard</a>
+        <div class="d-flex gap-2">
+            <a class="btn btn-outline-primary" href="user.html">Users</a>
+            <button id="logoutButton" class="btn btn-outline-secondary">Logout</button>
+        </div>
+    </nav>
+    <div class="d-flex justify-content-between align-items-end mb-4">
+        <div><span class="badge bg-primary-subtle text-primary mb-2">Venues</span><h1 class="h3 fw-bold mb-1">Venue Management</h1><p id="userSummary" class="text-secondary small mb-0"></p></div>
+        <button id="newVenueButton" class="btn btn-primary d-none" data-bs-toggle="modal" data-bs-target="#venueModal">Add venue</button>
+    </div>
+    <div id="alertBox" class="alert d-none" role="alert"></div>
+    <section class="card card-custom shadow-sm">
+        <div class="card-body">
+            <div class="row g-2 mb-3">
+                <div class="col-md-5"><input id="searchInput" class="form-control" placeholder="Search name or location"></div>
+                <div class="col-md-3"><select id="statusFilter" class="form-select"><option value="">All statuses</option><option>Available</option><option>Unavailable</option></select></div>
+                <div class="col-md-2"><input id="capacityFilter" class="form-control" type="number" min="0" placeholder="Min capacity"></div>
+                <div class="col-md-2"><button id="refreshButton" class="btn btn-outline-secondary w-100">Refresh</button></div>
+            </div>
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead><tr><th>Venue</th><th>Location</th><th>Capacity</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+                    <tbody id="venuesTable"><tr><td colspan="5" class="text-secondary">Loading venues...</td></tr></tbody>
+                </table>
+            </div>
+            <div id="pagination" class="d-flex justify-content-between align-items-center small text-secondary mt-3"></div>
+        </div>
+    </section>
+</main>
+<div class="modal fade" id="venueModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog"><div class="modal-content"><form id="venueForm">
+        <div class="modal-header"><h2 id="modalTitle" class="modal-title h5">Add venue</h2><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <input id="venueId" type="hidden">
+            <div class="mb-3"><label class="form-label">Venue name</label><input id="venueName" class="form-control" maxlength="100" required></div>
+            <div class="mb-3"><label class="form-label">Location</label><input id="location" class="form-control" maxlength="255" required></div>
+            <div class="mb-3"><label class="form-label">Capacity</label><input id="capacity" class="form-control" type="number" min="1" max="1000000" required></div>
+            <div><label class="form-label">Status</label><select id="status" class="form-select"><option>Available</option><option>Unavailable</option></select></div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button class="btn btn-primary">Save venue</button></div>
+    </form></div></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const API = 'http://localhost/events_booking/backend/venues.php';
+    const token = sessionStorage.getItem('event_booking_token');
+    const user = JSON.parse(sessionStorage.getItem('event_booking_user') || 'null');
+    const role = String(user?.role || '').trim().toLowerCase();
+    if (!token || !user || role === 'customer') window.location.href = 'login.html';
+    const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+    if (role === 'administrator') document.getElementById('dashboardLink').href = 'admin-dashboard.html';
+    const modal = new bootstrap.Modal(document.getElementById('venueModal'));
+    let page = 1;
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[char]));
+    const showAlert = (type, message) => { const box = document.getElementById('alertBox'); box.className = `alert alert-${type}`; box.textContent = message; };
+    function queryString() {
+        const params = new URLSearchParams({ page, limit: 10, sort: 'venue_name', order: 'asc' });
+        const search = document.getElementById('searchInput').value.trim();
+        const status = document.getElementById('statusFilter').value;
+        const capacity = document.getElementById('capacityFilter').value;
+        if (search) params.set('search', search);
+        if (status) params.set('status', status);
+        if (capacity) params.set('min_capacity', capacity);
+        return params;
+    }
+    async function loadVenues() {
+        try {
+            const response = await fetch(`${API}?${queryString()}`, { headers });
+            const result = await response.json();
+            if (!response.ok || result.success !== true) throw new Error(result.message || 'Unable to load venues.');
+            const venues = result.data || [];
+            document.getElementById('venuesTable').innerHTML = venues.length ? venues.map(venue => `
+                <tr><td class="fw-semibold">${escapeHtml(venue.venue_name)}</td><td>${escapeHtml(venue.location)}</td>
+                <td>${Number(venue.capacity).toLocaleString()}</td><td><span class="badge ${venue.status === 'Available' ? 'text-bg-success' : 'text-bg-secondary'}">${escapeHtml(venue.status)}</span></td>
+                <td class="text-end text-nowrap">${role === 'administrator' ? `<button class="btn btn-sm btn-outline-primary" onclick="editVenue(${venue.venue_id})">Edit</button> <button class="btn btn-sm btn-outline-danger" onclick="deleteVenue(${venue.venue_id})">Delete</button>` : '<span class="text-secondary small">View only</span>'}</td></tr>
+            `).join('') : '<tr><td colspan="5" class="text-secondary">No venues found.</td></tr>';
+            const pagination = result.pagination || {};
+            document.getElementById('pagination').innerHTML = pagination.total_pages > 1 ? `<button id="previousPage" class="btn btn-sm btn-outline-secondary" ${page <= 1 ? 'disabled' : ''}>Previous</button><span>Page ${page} of ${pagination.total_pages}</span><button id="nextPage" class="btn btn-sm btn-outline-secondary" ${page >= pagination.total_pages ? 'disabled' : ''}>Next</button>` : `<span>${pagination.total || venues.length} venue(s)</span>`;
+            document.getElementById('previousPage')?.addEventListener('click', () => { page--; loadVenues(); });
+            document.getElementById('nextPage')?.addEventListener('click', () => { page++; loadVenues(); });
+        } catch (error) { showAlert('danger', error.message); }
+    }
+    function resetForm(venue = null) {
+        document.getElementById('venueForm').reset();
+        document.getElementById('venueId').value = venue?.venue_id || '';
+        document.getElementById('modalTitle').textContent = venue ? 'Edit venue' : 'Add venue';
+        if (venue) { document.getElementById('venueName').value = venue.venue_name; document.getElementById('location').value = venue.location; document.getElementById('capacity').value = venue.capacity; document.getElementById('status').value = venue.status; }
+    }
+    async function editVenue(id) { const response = await fetch(`${API}?id=${id}`, { headers }); const result = await response.json(); if (!response.ok || result.success !== true) return showAlert('danger', result.message || 'Unable to load venue.'); resetForm(result.data); modal.show(); }
+    async function deleteVenue(id) { if (!confirm('Delete this venue? Venues assigned to events cannot be deleted.')) return; const response = await fetch(`${API}?id=${id}`, { method: 'DELETE', headers }); const result = await response.json(); if (!response.ok || result.success !== true) return showAlert('danger', result.message || 'Unable to delete venue.'); showAlert('success', result.message); loadVenues(); }
+    document.getElementById('venueForm').addEventListener('submit', async event => { event.preventDefault(); const id = document.getElementById('venueId').value; const data = { venue_name: document.getElementById('venueName').value.trim(), location: document.getElementById('location').value.trim(), capacity: Number(document.getElementById('capacity').value), status: document.getElementById('status').value }; const response = await fetch(id ? `${API}?id=${id}` : API, { method: id ? 'PUT' : 'POST', headers, body: JSON.stringify(data) }); const result = await response.json(); if (!response.ok || result.success !== true) return showAlert('danger', result.message || 'Unable to save venue.'); modal.hide(); showAlert('success', result.message); loadVenues(); });
+    document.getElementById('newVenueButton').addEventListener('click', () => resetForm());
+    document.getElementById('refreshButton').addEventListener('click', loadVenues);
+    document.getElementById('searchInput').addEventListener('input', () => { page = 1; loadVenues(); });
+    document.getElementById('statusFilter').addEventListener('change', () => { page = 1; loadVenues(); });
+    document.getElementById('capacityFilter').addEventListener('change', () => { page = 1; loadVenues(); });
+    document.getElementById('userSummary').textContent = `${user?.name || 'Authenticated user'} (${user?.role || 'Unknown role'})`;
+    document.getElementById('newVenueButton').classList.toggle('d-none', role !== 'administrator');
+    document.getElementById('logoutButton').addEventListener('click', () => { sessionStorage.clear(); window.location.href = 'login.html'; });
+    loadVenues();
+</script>
+</body>
+</html>

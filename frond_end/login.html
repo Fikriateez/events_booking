@@ -23,7 +23,7 @@
     <main class="container" style="max-width: 960px;">
         <div class="text-center mb-4">
             <span class="badge bg-primary-subtle text-primary fw-semibold px-3 py-2 rounded-pill mb-2">
-                Ticketing & External API Module
+                Ticketing
             </span>
             <h1 class="h2 fw-bold text-dark mb-1">Event Booking Portal</h1>
             <p class="text-secondary small mb-0">Sign in to manage your event tickets.</p>
@@ -40,9 +40,9 @@
 
                 <form id="loginForm" novalidate>
                     <div class="mb-3">
-                        <label for="username" class="form-label text-secondary small fw-medium">Username</label>
-                        <input id="username" name="username" class="form-control form-control-lg fs-6" autocomplete="username" required>
-                        <div class="invalid-feedback">Enter your username.</div>
+                        <label for="email" class="form-label text-secondary small fw-medium">Email</label>
+                        <input id="email" name="email" type="email" class="form-control form-control-lg fs-6" autocomplete="email" required>
+                        <div class="invalid-feedback">Enter your email.</div>
                     </div>
                     <div class="mb-4">
                         <label for="password" class="form-label text-secondary small fw-medium">Password</label>
@@ -81,7 +81,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        username: document.getElementById('username').value.trim(),
+                        email: document.getElementById('email').value.trim(),
                         password: document.getElementById('password').value
                     })
                 });
@@ -93,7 +93,14 @@
 
                 sessionStorage.setItem('event_booking_token', result.token);
                 sessionStorage.setItem('event_booking_user', JSON.stringify(result.user));
-                window.location.href = 'booking.html';
+                const role = String(result.user.role || '').trim().toLowerCase();
+                if (role === 'customer') {
+                    window.location.href = 'booking.html';
+                } else if (role === 'administrator') {
+                    window.location.href = 'admin-dashboard.html';
+                } else {
+                    window.location.href = 'dashboard.html';
+                }
             } catch (error) {
                 showAlert('danger', error.message);
             } finally {
