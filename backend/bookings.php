@@ -256,24 +256,6 @@ if ($method === 'POST') {
     }
 
     try {
-        $eventStmt = $conn->prepare(
-            "SELECT * FROM events
-             WHERE event_id = ? AND status = 'published' AND available_tickets >= ?"
-        );
-        $eventStmt->execute([$eventId, $quantity]);
-        $event = $eventStmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$event) {
-            sendBookingJson(409, [
-                "success" => false,
-                "message" => "Event is unavailable or does not have enough tickets."
-            ]);
-        }
-
-        $eventName = $event['title'];
-        $ticketPrice = (float) $event['ticket_price'];
-        $totalPrice = $ticketPrice * $quantity;
-
         $userStmt = $conn->prepare("SELECT email FROM users WHERE user_id = ?");
         $userStmt->execute([$userId]);
         $user = $userStmt->fetch(PDO::FETCH_ASSOC);
@@ -281,22 +263,46 @@ if ($method === 'POST') {
             throw new RuntimeException("Authenticated user was not found.");
         }
 
-       
-        try {
-            $insertStmt = $conn->prepare("INSERT INTO bookings (user_id, event_id, quantity, total_price, booking_status) VALUES (?, ?, ?, ?, 'Confirmed')");
-            $insertStmt->execute([$userId, $eventId, $quantity, $totalPrice]);
-            $bookingId = $conn->lastInsertId();
-        } catch (Exception $ex) {
-            $insertStmt = $conn->prepare("INSERT INTO bookings (user_id, event_id, quantity, total_price, status) VALUES (?, ?, ?, ?, 'Confirmed')");
-            $insertStmt->execute([$userId, $eventId, $quantity, $totalPrice]);
-            $bookingId = $conn->lastInsertId();
+        $conn->beginTransaction();
+
+        $updateStmt = $conn->prepare(
+            "UPDATE events
+             SET available_tickets = available_tickets - ?
+             WHERE event_id = ?
+               AND status = 'published'
+               AND available_tickets >= ?"
+        );
+        $updateStmt->execute([$quantity, $eventId, $quantity]);
+        if ($updateStmt->rowCount() !== 1) {
+            $conn->rollBack();
+            sendBookingJson(409, [
+                "success" => false,
+                "message" => "Event is unavailable or does not have enough tickets."
+            ]);
         }
 
-        
-        try {
-            $updateStmt = $conn->prepare("UPDATE events SET available_tickets = available_tickets - ? WHERE event_id = ?");
-            $updateStmt->execute([$quantity, $eventId]);
-        } catch (Exception $ex) {}
+        $eventStmt = $conn->prepare(
+            "SELECT title, ticket_price FROM events WHERE event_id = ?"
+        );
+        $eventStmt->execute([$eventId]);
+        $event = $eventStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$event) {
+            throw new RuntimeException("Event was not found after stock reservation.");
+        }
+
+        $eventName = $event['title'];
+        $safeEventName = htmlspecialchars($eventName, ENT_QUOTES, 'UTF-8');
+        $ticketPrice = (float) $event['ticket_price'];
+        $totalPrice = $ticketPrice * $quantity;
+
+        $insertStmt = $conn->prepare(
+            "INSERT INTO bookings
+                (user_id, event_id, quantity, total_price, booking_status)
+             VALUES (?, ?, ?, ?, 'Confirmed')"
+        );
+        $insertStmt->execute([$userId, $eventId, $quantity, $totalPrice]);
+        $bookingId = $conn->lastInsertId();
+        $conn->commit();
 
         $userEmail = $user['email'];
 
@@ -308,7 +314,7 @@ if ($method === 'POST') {
                 <p>Thank you for your purchase. Here is your ticket pass summary:</p>
                 <ul>
                     <li><strong>Booking Ref:</strong> BKG-2026-".str_pad($bookingId, 4, '0', STR_PAD_LEFT)."</li>
-                    <li><strong>Event:</strong> {$eventName}</li>
+                    <li><strong>Event:</strong> {$safeEventName}</li>
                     <li><strong>Quantity:</strong> {$quantity} Ticket(s)</li>
                     <li><strong>Total Paid:</strong> RM ".number_format($totalPrice, 2)."</li>
                 </ul>
@@ -326,6 +332,9 @@ if ($method === 'POST') {
         sendResponseThenEmail($response, $userEmail, $subject, $htmlContent);
 
     } catch (Throwable $e) {
+        if ($conn->inTransaction()) {
+            $conn->rollBack();
+        }
         error_log('Booking POST failed: ' . $e->getMessage());
         sendBookingJson(500, [
             "success" => false,
@@ -362,23 +371,18 @@ if ($method === 'PUT') {
     }
 
     try {
-        $booking = null;
-        if ($bookingId) {
-            $stmt = $conn->prepare("SELECT * FROM bookings WHERE booking_id = ? AND user_id = ?");
-            $stmt->execute([$bookingId, $userId]);
-            $booking = $stmt->fetch(PDO::FETCH_ASSOC);
-        }
+        $conn->beginTransaction();
+
+        $stmt = $conn->prepare(
+            "SELECT * FROM bookings
+             WHERE booking_id = ? AND user_id = ?
+             FOR UPDATE"
+        );
+        $stmt->execute([$bookingId, $userId]);
+        $booking = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$booking) {
-            $stmt = $conn->prepare("SELECT * FROM bookings WHERE user_id = ? ORDER BY booking_id DESC LIMIT 1");
-            $stmt->execute([$userId]);
-            $booking = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($booking) {
-                $bookingId = $booking['booking_id'];
-            }
-        }
-
-        if (!$booking) {
+            $conn->rollBack();
             sendBookingJson(404, [
                 "success" => false,
                 "message" => "Booking not found for the authenticated user."
@@ -386,27 +390,33 @@ if ($method === 'PUT') {
         }
 
         if (strtolower($booking['booking_status']) === 'cancelled') {
+            $conn->rollBack();
             sendBookingJson(409, [
                 "success" => false,
                 "message" => "This booking has already been cancelled."
             ]);
         }
 
-        
-        try {
-            $updateStmt = $conn->prepare("UPDATE bookings SET booking_status = ? WHERE booking_id = ?");
-            $updateStmt->execute([$bookingStatus, $bookingId]);
-        } catch (Exception $ex) {
-            $updateStmt = $conn->prepare("UPDATE bookings SET status = ? WHERE booking_id = ?");
-            $updateStmt->execute([$bookingStatus, $bookingId]);
+        $updateStmt = $conn->prepare(
+            "UPDATE bookings SET booking_status = ?
+             WHERE booking_id = ? AND user_id = ? AND booking_status <> 'Cancelled'"
+        );
+        $updateStmt->execute([$bookingStatus, $bookingId, $userId]);
+        if ($updateStmt->rowCount() !== 1) {
+            throw new RuntimeException("Booking status was not updated.");
         }
 
         // Restore stock
-        if (strtolower($bookingStatus) === 'cancelled' && !empty($booking['event_id'])) {
-            try {
-                $restoreStmt = $conn->prepare("UPDATE events SET available_tickets = available_tickets + ? WHERE event_id = ?");
-                $restoreStmt->execute([$booking['quantity'], $booking['event_id']]);
-            } catch (Exception $ex) {}
+        if (strtolower($bookingStatus) === 'cancelled') {
+            $restoreStmt = $conn->prepare(
+                "UPDATE events
+                 SET available_tickets = available_tickets + ?
+                 WHERE event_id = ?"
+            );
+            $restoreStmt->execute([$booking['quantity'], $booking['event_id']]);
+            if ($restoreStmt->rowCount() !== 1) {
+                throw new RuntimeException("Ticket stock was not restored.");
+            }
         }
 
         $userStmt = $conn->prepare("SELECT email FROM users WHERE user_id = ?");
@@ -419,6 +429,8 @@ if ($method === 'PUT') {
         $eventStmt = $conn->prepare("SELECT title FROM events WHERE event_id = ?");
         $eventStmt->execute([$booking['event_id']]);
         $eventName = $eventStmt->fetchColumn() ?: 'Event';
+        $safeEventName = htmlspecialchars($eventName, ENT_QUOTES, 'UTF-8');
+        $conn->commit();
 
         
         $subject = "Booking Cancellation Notice - #" . $bookingId;
@@ -426,7 +438,7 @@ if ($method === 'PUT') {
             <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;'>
                 <h2 style='color: #e11d48;'>Booking Cancellation Confirmed</h2>
                 <p>Hello,</p>
-                <p>Your booking <strong>#{$bookingId}</strong> for <strong>{$eventName}</strong> has been <strong style='color: #e11d48;'>CANCELLED</strong>.</p>
+                <p>Your booking <strong>#{$bookingId}</strong> for <strong>{$safeEventName}</strong> has been <strong style='color: #e11d48;'>CANCELLED</strong>.</p>
                 <hr style='border: none; border-top: 1px solid #e2e8f0;'>
                 <p><strong>Cancelled Quantity:</strong> {$booking['quantity']} Ticket(s)</p>
                 <p><strong>Refundable Total:</strong> RM " . number_format($booking['total_price'], 2) . "</p>
@@ -445,6 +457,9 @@ if ($method === 'PUT') {
         sendResponseThenEmail($response, $userEmail, $subject, $htmlContent);
 
     } catch (Throwable $e) {
+        if ($conn->inTransaction()) {
+            $conn->rollBack();
+        }
         error_log('Booking PUT failed: ' . $e->getMessage());
         sendBookingJson(500, [
             "success" => false,

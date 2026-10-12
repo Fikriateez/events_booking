@@ -40,33 +40,77 @@ and JWT for authentication.
 - Bootstrap 5 alerts and responsive layouts.
 - Administrator venue management with search, filtering, pagination, and CRUD operations.
 
-## User Roles
+## Role Permissions
 
 ### Administrator
 
-- Manage users and venues.
-- View booking and ticket availability information.
+- View and manage users.
+- View and manage venues.
+- View system events.
+- View system booking records.
+- Oversee system records according to administrator permissions.
+- Administrators can view events but cannot create, edit, or delete events.
 
-### Organiser or Staff
+### Organiser / Staff
 
-- Create and manage event information. Organisers can edit and delete events
-  assigned to their account; Staff can manage all events.
-- Select an available venue when creating or editing an event.
-- New events default to `published` so customers can book them. Use `draft`
-  when an event should remain hidden until it is ready.
-- Venues assigned to active events are marked `In Use` automatically. They are
-  released back to `Available` when the event is cancelled, completed, or
-  deleted.
-- Monitor ticket availability.
-- View customer bookings.
+- Cannot manage users.
+- Cannot manage venues.
+- Create events.
+- Edit and manage permitted events.
+- Manage event schedules.
+- Manage ticket availability.
+- View relevant booking records.
+- Organisers can manage their own events; Staff can manage all events.
+
+When an event is created, its `organiser_id` is taken from the authenticated
+user. Venues assigned to active events are marked `In Use` automatically and
+are released when the event is cancelled, completed, or deleted.
 
 ### Customer
 
-- Log in to the system.
-- Select an event and ticket quantity.
-- Confirm a booking.
-- View the latest booking.
-- Cancel a booking.
+- Cannot manage users, venues, or events.
+- Browse published events.
+- Check ticket availability.
+- Make bookings.
+- Cancel eligible own bookings.
+- View own booking status and details.
+
+## Events Permissions
+
+| Role | View events | Create events | Edit/manage events | Delete events |
+| --- | --- | --- | --- | --- |
+| Administrator | Yes, all events | No | No | No |
+| Organiser / Staff | Yes | Yes | Yes, within permitted scope | Yes, within permitted scope |
+| Customer | Yes, published events only | No | No | No |
+
+The backend applies these permissions through JWT authentication and role
+checks:
+
+- `GET /backend/events.php` is available to all authenticated roles.
+- Customers receive only events with `published` status.
+- `POST`, `PUT`, and `DELETE /backend/events.php` are available only to
+  Organiser and Staff users.
+- Organisers can modify only events assigned to their account.
+- Staff can manage all events.
+
+## Booking Record Permissions
+
+| Role | Booking records visible |
+| --- | --- |
+| Administrator | All system booking records |
+| Organiser / Staff | Relevant bookings for permitted events |
+| Customer | Own bookings only |
+
+The booking API therefore keeps the Administrator booking link and oversight
+view. Administrators can use:
+
+```http
+GET /backend/bookings.php
+```
+
+Organisers receive bookings for events assigned to them, while Staff receive
+all booking records. Customers receive only records belonging to their own
+account.
 
 ### Venue API
 

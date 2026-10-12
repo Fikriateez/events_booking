@@ -34,25 +34,35 @@ $userId = filter_var($_GET["id"] ?? null, FILTER_VALIDATE_INT, [
 
 try {
     if ($method === "GET") {
-        if ($currentUser->role === "Administrator") {
-            $stmt = $conn->query(
-                "SELECT user_id, name, email, role FROM users ORDER BY user_id ASC"
+        requireRole($currentUser, ["Administrator"]);
+
+        // Request 3: Jika ada parameter ?id= dalam URL
+        if (isset($_GET["id"])) {
+            if ($userId === false) {
+                sendUserJson(400, ["success" => false, "message" => "A valid user id is required."]);
+            }
+
+            $stmt = $conn->prepare(
+                "SELECT user_id, name, email, role FROM users WHERE user_id = ?"
             );
-            sendUserJson(200, [
-                "success" => true,
-                "data" => array_map("publicUser", $stmt->fetchAll(PDO::FETCH_ASSOC))
-            ]);
+            $stmt->execute([$userId]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$user) {
+                sendUserJson(404, ["success" => false, "message" => "User not found"]);
+            }
+
+            sendUserJson(200, ["success" => true, "data" => publicUser($user)]);
         }
 
-        $stmt = $conn->prepare(
-            "SELECT user_id, name, email, role FROM users WHERE user_id = ?"
+        // Request 2: Jika tiada parameter ?id= (List all users)
+        $stmt = $conn->query(
+            "SELECT user_id, name, email, role FROM users ORDER BY user_id ASC"
         );
-        $stmt->execute([(int) $currentUser->user_id]);
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$user) {
-            sendUserJson(404, ["success" => false, "message" => "User not found"]);
-        }
-        sendUserJson(200, ["success" => true, "data" => publicUser($user)]);
+        sendUserJson(200, [
+            "success" => true,
+            "data" => array_map("publicUser", $stmt->fetchAll(PDO::FETCH_ASSOC))
+        ]);
     }
 
     requireRole($currentUser, ["Administrator"]);
@@ -84,6 +94,12 @@ try {
         sendUserJson(400, ["success" => false, "message" => "A valid user id is required."]);
     }
     if ($method === "PUT") {
+        $existingStmt = $conn->prepare("SELECT user_id FROM users WHERE user_id = ?");
+        $existingStmt->execute([$userId]);
+        if (!$existingStmt->fetchColumn()) {
+            sendUserJson(404, ["success" => false, "message" => "User not found."]);
+        }
+
         $fields = [];
         $params = [];
         if (array_key_exists("name", $data)) {

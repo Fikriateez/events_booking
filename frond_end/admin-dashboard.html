@@ -27,7 +27,7 @@
         <div class="d-flex gap-2">
             <a class="btn btn-outline-primary" href="user.html">Manage users</a>
             <a class="btn btn-outline-primary" href="venues.html">Manage venues</a>
-            <button id="logoutButton" class="btn btn-outline-secondary">Logout</button>
+            <button id="logoutButton" type="button" class="btn btn-outline-secondary">Logout</button>
         </div>
     </header>
     <div id="alertBox" class="alert d-none" role="alert"></div>
@@ -38,7 +38,7 @@
     </section>
     <section class="card card-custom shadow-sm mb-4">
         <div class="card-body">
-            <div class="d-flex justify-content-between align-items-center mb-3"><div><h2 class="h5 fw-bold mb-1">System event records</h2><p class="text-secondary small mb-0">Read-only oversight; event changes belong to Organisers and Staff.</p></div><button id="refreshButton" class="btn btn-sm btn-outline-secondary">Refresh</button></div>
+            <div class="d-flex justify-content-between align-items-center mb-3"><div><h2 class="h5 fw-bold mb-1">System event records</h2><p class="text-secondary small mb-0">Read-only oversight; event changes belong to Organisers and Staff.</p></div><button id="refreshButton" type="button" class="btn btn-sm btn-outline-secondary">Refresh</button></div>
             <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Event</th><th>Organiser</th><th>Date</th><th>Status</th><th>Availability</th></tr></thead><tbody id="eventsTable"><tr><td colspan="5" class="text-secondary">Loading records...</td></tr></tbody></table></div>
         </div>
     </section>

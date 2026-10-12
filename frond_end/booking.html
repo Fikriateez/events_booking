@@ -143,7 +143,7 @@
 
                         <div class="p-3 bg-light rounded-3 mb-4 d-flex justify-content-between align-items-center">
                             <span class="text-secondary small fw-medium">Estimated Price:</span>
-                            <span class="fw-bold fs-5 text-primary" id="totalPriceDisplay">RM 50.00</span>
+                            <span class="fw-bold fs-5 text-primary" id="totalPriceDisplay">RM 0.00</span>
                         </div>
 
                         
@@ -161,8 +161,8 @@
                 <div class="card-body p-0 d-flex flex-column justify-content-between">
                     <div>
                         <div class="d-flex justify-content-between align-items-center mb-1">
-                            <h5 class="fw-bold text-dark mb-0">My Concert Ticket</h5>
-                            <button class="btn btn-sm btn-outline-secondary py-1 px-2 fs-7" onclick="loadLatestBooking()">🔄 Refresh</button>
+                            <h5 class="fw-bold text-dark mb-0">My Event Ticket</h5>
+                            <button id="refreshTicketButton" class="btn btn-sm btn-outline-secondary py-1 px-2 fs-7" type="button">Refresh</button>
                         </div>
                         <p class="text-secondary small mb-3">Your latest booking and ticket status.</p>
 
@@ -172,7 +172,7 @@
 
                     
                     <div id="actionContainer" class="mt-3 d-none">
-                        <button class="btn btn-outline-danger w-100 fs-6 fw-semibold py-2" id="btnCancel" onclick="cancelCurrentBooking()">
+                        <button class="btn btn-outline-danger w-100 fs-6 fw-semibold py-2" id="btnCancel" type="button">
                             Cancel Ticket
                         </button>
                     </div>
@@ -227,7 +227,8 @@
     if (currentUser && String(currentUser.role || '').trim().toLowerCase() !== 'customer') {
         window.location.href = 'dashboard.html';
     }
-    let currentBookingId = 1;
+    const MAX_BOOKING_QUANTITY = 10;
+    let currentBookingId = null;
     let currentUserId = currentUser ? Number(currentUser.user_id) : 0;
     let currentHolderName = currentUser ? currentUser.name : 'Ticket holder';
     let events = [];
@@ -258,14 +259,16 @@
     function calculateTotal() {
         const eventSelect = document.getElementById('event_id');
         const selectedOption = eventSelect.options[eventSelect.selectedIndex];
-        const price = parseFloat(selectedOption.getAttribute('data-price')) || 0;
+        const price = Number(selectedOption?.getAttribute('data-price'));
         const qty = parseInt(document.getElementById('quantity').value) || 0;
-        const available = parseInt(selectedOption.getAttribute('data-available')) || 0;
-        document.getElementById('quantity').max = available || 1;
+        const available = Number(selectedOption?.getAttribute('data-available')) || 0;
+        const maximum = Math.min(MAX_BOOKING_QUANTITY, Math.max(available, 0));
+        document.getElementById('quantity').max = maximum || 1;
         document.getElementById('eventAvailability').textContent =
             available > 0 ? `${available} ticket(s) available` : 'Sold out';
-        document.getElementById('quantity').classList.toggle('is-invalid', qty < 1 || qty > available);
-        const total = price * qty;
+        document.getElementById('quantity').classList.toggle('is-invalid', qty < 1 || qty > maximum);
+        document.getElementById('btnSubmit').disabled = !eventSelect.value || maximum < 1 || qty < 1 || qty > maximum;
+        const total = (Number.isFinite(price) && price >= 0 ? price : 0) * qty;
         document.getElementById('totalPriceDisplay').innerText = `RM ${total.toFixed(2)}`;
     }
 
@@ -279,12 +282,12 @@
             if (!response.ok || result.success !== true) {
                 throw new Error(result.message || 'Unable to load events.');
             }
-            events = result.data || [];
+            events = Array.isArray(result.data) ? result.data : [];
             select.innerHTML = events.length
                 ? events.map(event => `
-                    <option value="${event.event_id}" data-price="${event.ticket_price}"
-                        data-available="${event.available_tickets}">
-                        ${event.title} - RM ${Number(event.ticket_price).toFixed(2)}
+                    <option value="${Number(event.event_id)}" data-price="${Number(event.ticket_price) >= 0 ? Number(event.ticket_price) : 0}"
+                        data-available="${Math.max(Number(event.available_tickets) || 0, 0)}">
+                        ${escapeHtml(event.title || 'Event')} - RM ${formatMoney(event.ticket_price)}
                     </option>`).join('')
                 : '<option value="">No published events available</option>';
             select.disabled = events.length === 0;
@@ -293,7 +296,32 @@
             calculateTotal();
         } catch (error) {
             select.innerHTML = '<option value="">Unable to load events</option>';
-            showAlert('danger', `<strong>Events unavailable:</strong> ${error.message}`);
+            showAlert('danger', `Events unavailable: ${error.message}`);
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, character => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+        }[character]));
+    }
+
+    function formatMoney(value) {
+        const amount = Number(value);
+        return `RM ${(Number.isFinite(amount) && amount >= 0 ? amount : 0).toFixed(2)}`;
+    }
+
+    function normaliseStatus(value) {
+        const status = String(value ?? '').trim();
+        return status || 'Unknown';
+    }
+
+    function statusClass(status) {
+        switch (status.toLowerCase()) {
+            case 'confirmed': return 'bg-success-subtle text-success';
+            case 'pending': return 'bg-warning-subtle text-warning-emphasis';
+            case 'cancelled': return 'bg-danger-subtle text-danger';
+            default: return 'bg-secondary-subtle text-secondary';
         }
     }
 
@@ -304,18 +332,18 @@
             return;
         }
         container.innerHTML = list.map(booking => {
-            const cancelled = (booking.booking_status || '').toLowerCase() === 'cancelled';
+            const status = normaliseStatus(booking.booking_status || booking.status);
             return `
                 <div class="booking-row bg-light rounded-3 p-3 mb-2 d-flex flex-column flex-md-row justify-content-between gap-2">
                     <div>
-                        <strong class="text-dark">${booking.event_name || 'Event'}</strong>
-                        <div class="text-secondary small">Booking #${booking.booking_id} · ${booking.quantity} ticket(s)</div>
+                        <strong class="text-dark">${escapeHtml(booking.event_name || 'Event')}</strong>
+                        <div class="text-secondary small">Booking #${escapeHtml(booking.booking_id ?? '-')} · ${escapeHtml(booking.quantity ?? 0)} ticket(s)</div>
                     </div>
                     <div class="text-md-end">
-                        <span class="badge ${cancelled ? 'bg-danger-subtle text-danger' : 'bg-success-subtle text-success'}">
-                            ${booking.booking_status || 'Unknown'}
+                        <span class="badge ${statusClass(status)}">
+                            ${escapeHtml(status)}
                         </span>
-                        <div class="small fw-semibold text-primary mt-1">RM ${Number(booking.total_price).toFixed(2)}</div>
+                        <div class="small fw-semibold text-primary mt-1">${formatMoney(booking.total_price)}</div>
                     </div>
                 </div>`;
         }).join('');
@@ -326,10 +354,16 @@
         const alertBox = document.getElementById('alertBox');
         alertBox.className = `alert alert-${type} alert-dismissible fade show d-flex align-items-center gap-2 mb-4 small shadow-sm`;
         alertBox.setAttribute('role', 'alert');
-        alertBox.innerHTML = `
-            <div class="flex-grow-1">${message}</div>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close notification"></button>
-        `;
+        alertBox.replaceChildren();
+        const content = document.createElement('div');
+        content.className = 'flex-grow-1';
+        content.textContent = message;
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'btn-close';
+        close.setAttribute('data-bs-dismiss', 'alert');
+        close.setAttribute('aria-label', 'Close notification');
+        alertBox.append(content, close);
     }
 
     
@@ -374,12 +408,14 @@
         currentBookingId = data.booking_id || data.id || currentBookingId;
         currentUserId = data.user_id || currentUserId;
         currentHolderName = data.holder_name || currentHolderName;
-        const statusVal = (data.booking_status || data.status || 'Confirmed').toString();
-        const isConfirmed = (statusVal.toLowerCase() === 'confirmed');
+        const statusVal = normaliseStatus(data.booking_status || data.status);
+        const isCancelled = statusVal.toLowerCase() === 'cancelled';
 
-        const statusBadge = isConfirmed 
+        const statusBadge = isCancelled
+            ? '<span class="badge bg-danger text-white px-3 py-1 rounded-pill">✕ CANCELLED TICKET</span>'
+            : statusVal.toLowerCase() === 'confirmed'
             ? '<span class="badge bg-success text-white px-3 py-1 rounded-pill">✓ VALID ENTRY</span>'
-            : '<span class="badge bg-danger text-white px-3 py-1 rounded-pill">✕ CANCELLED PASS</span>';
+            : `<span class="badge bg-warning text-dark px-3 py-1 rounded-pill">${escapeHtml(statusVal.toUpperCase())}</span>`;
 
         const bookingCode = `BKG-2026-${String(currentBookingId).padStart(4, '0')}`;
 
@@ -388,8 +424,8 @@
                 <!-- Ticket Header -->
                 <div class="ticket-header d-flex justify-content-between align-items-center">
                     <div>
-                        <span class="badge bg-primary-subtle text-primary fw-semibold px-2 py-1 rounded mb-1" style="font-size:0.7rem;">OFFICIAL CONCERT PASS</span>
-                        <h5 class="fw-bold mb-0 text-white">${data.event_name || 'Event Ticket'}</h5>
+                        <span class="badge bg-primary-subtle text-primary fw-semibold px-2 py-1 rounded mb-1" style="font-size:0.7rem;">OFFICIAL ADMISSION TICKET</span>
+                        <h5 class="fw-bold mb-0 text-white">${escapeHtml(data.event_name || 'Event Ticket')}</h5>
                     </div>
                     <div class="text-end">
                         ${statusBadge}
@@ -405,15 +441,15 @@
                         </div>
                         <div class="col-6">
                             <span class="text-secondary small d-block">User / Holder ID</span>
-                            <strong class="text-dark fs-6">User #${currentUserId} (${currentHolderName})</strong>
+                            <strong class="text-dark fs-6">User #${escapeHtml(currentUserId)} (${escapeHtml(currentHolderName)})</strong>
                         </div>
                         <div class="col-6">
                             <span class="text-secondary small d-block">Ticket Quantity</span>
-                            <strong class="text-dark fs-6">${data.quantity || 1} Ticket(s)</strong>
+                            <strong class="text-dark fs-6">${escapeHtml(data.quantity ?? 0)} Ticket(s)</strong>
                         </div>
                         <div class="col-6">
                             <span class="text-secondary small d-block">Total Paid</span>
-                            <strong class="text-primary fs-6">RM ${parseFloat(data.total_price || data.price || 50).toFixed(2)}</strong>
+                            <strong class="text-primary fs-6">${formatMoney(data.total_price ?? data.price)}</strong>
                         </div>
                     </div>
 
@@ -422,11 +458,11 @@
 
                     <!-- Barcode & Gate Scan Area -->
                     <div class="barcode-box text-center">
-                        <span class="text-muted fw-semibold uppercase d-block mb-1" style="font-size:0.68rem; letter-spacing: 1px;">
+                        <span class="text-muted fw-semibold text-uppercase d-block mb-1 small">
                             SCAN AT VENUE TURNSTILE ENTRANCE
                         </span>
                         ${generateBarcodeSVG(bookingCode)}
-                        <span class="text-secondary fw-mono d-block mt-1" style="font-size:0.75rem; font-family: monospace;">
+                        <span class="text-secondary font-monospace d-block mt-1 small">
                             * ${bookingCode} *
                         </span>
                     </div>
@@ -434,7 +470,7 @@
             </div>
         `;
 
-        if (isConfirmed) {
+        if (statusVal.toLowerCase() === 'confirmed') {
             actionContainer.classList.remove('d-none');
         } else {
             actionContainer.classList.add('d-none');
@@ -446,13 +482,13 @@
         e.preventDefault();
 
         const eventId = document.getElementById('event_id').value;
-        const quantity = parseInt(document.getElementById('quantity').value) || 1;
+        const quantity = parseInt(document.getElementById('quantity').value, 10);
         const btnSubmit = document.getElementById('btnSubmit');
         const selectedOption = document.getElementById('event_id').selectedOptions[0];
         const available = parseInt(selectedOption?.dataset.available || '0', 10);
-        if (!eventId || quantity < 1 || quantity > available) {
+        if (!eventId || !Number.isInteger(quantity) || quantity < 1 || quantity > Math.min(MAX_BOOKING_QUANTITY, available)) {
             this.classList.add('was-validated');
-            showAlert('warning', '<strong>Check your order:</strong> Select an event and a quantity within the available ticket limit.');
+            showAlert('warning', 'Check your order: select an event and a quantity from 1 to 10 within the available ticket limit.');
             calculateTotal();
             return;
         }
@@ -474,22 +510,24 @@
             let result = {};
             try { result = JSON.parse(text); } catch (err) {}
 
+            if (!response.ok || result.success !== true) {
+                throw new Error(result.message || `Booking failed (HTTP ${response.status}).`);
+            }
             if (result.success === true) {
-                showAlert('success', `<strong>Booking Confirmed!</strong> Your ticket is ready. ${result.email_message || 'Email status unavailable.'}`);
+                showAlert('success', `Booking confirmed. Your ticket is ready. ${result.email_message || 'Email status unavailable.'}`);
                 
                 renderTicket({
                     booking_id: result.booking_id || result.id || (currentBookingId + 1),
                     user_id: currentUserId,
                     quantity: quantity,
-                    total_price: quantity * Number(selectedOption.dataset.price || 0),
+                    event_name: selectedOption.textContent.split(' - RM ')[0].trim(),
+                    total_price: result.total_price ?? quantity * Number(selectedOption.dataset.price || 0),
                     booking_status: 'Confirmed'
                 });
                 loadLatestBooking();
-            } else {
-                showAlert('danger', `<strong>Error (POST):</strong> ${result.message || 'Booking failed.'}`);
             }
         } catch (error) {
-            showAlert('danger', '<strong>Connection Error:</strong> Unable to reach backend REST API.');
+            showAlert('danger', `Booking error: ${error.message || 'Unable to reach the backend REST API.'}`);
         } finally {
             btnSubmit.disabled = false;
             btnSubmit.innerText = 'Confirm & Pay';
@@ -510,26 +548,26 @@
             let result = {};
             try { result = JSON.parse(text); } catch (err) {}
 
-            if (result.user) {
+            if (!response.ok || result.success !== true) {
+                throw new Error(result.message || `Unable to load booking history (HTTP ${response.status}).`);
+            }
+            if (result.user && typeof result.user === 'object') {
                 updateAuthenticatedUser(result.user);
             }
 
             let list = [];
-            if (Array.isArray(result)) {
-                list = result;
-            } else if (result.data && Array.isArray(result.data)) {
+            if (Array.isArray(result.data)) {
                 list = result.data;
-            } else if (result.bookings && Array.isArray(result.bookings)) {
-                list = result.bookings;
-            } else if (typeof result === 'object' && result !== null && (result.booking_id || result.id)) {
-                list = [result];
+            } else {
+                throw new Error('The booking history response was invalid.');
             }
 
             renderBookingHistory(list);
             renderBookingPagination(result.pagination);
-            const activeBookings = list.filter(booking =>
-                String(booking.booking_status || booking.status || '').toLowerCase() !== 'cancelled'
-            );
+            const activeBookings = list.filter(booking => {
+                const status = String(booking.booking_status || booking.status || '').toLowerCase();
+                return status !== 'cancelled';
+            });
             if (activeBookings.length > 0) {
                 renderTicket(activeBookings[0]);
             } else {
@@ -537,7 +575,9 @@
                 document.getElementById('actionContainer').classList.add('d-none');
             }
         } catch (error) {
-            showAlert('danger', '<strong>Error:</strong> Unable to load the booking from the database.');
+            showAlert('danger', `Booking history error: ${error.message || 'Unable to load bookings from the database.'}`);
+            document.getElementById('bookingHistory').textContent =
+                `Unable to load booking history: ${error.message || 'Please try again.'}`;
             document.getElementById('ticketContainer').innerHTML = '';
             document.getElementById('actionContainer').classList.add('d-none');
         }
@@ -550,10 +590,10 @@
             return;
         }
         container.innerHTML = `
-            <button class="btn btn-sm btn-outline-secondary" ${pagination.page <= 1 ? 'disabled' : ''}
+            <button type="button" class="btn btn-sm btn-outline-secondary" ${pagination.page <= 1 ? 'disabled' : ''}
                 id="previousBookingPage">Previous</button>
             <span class="text-secondary">Page ${pagination.page} of ${pagination.totalPages}</span>
-            <button class="btn btn-sm btn-outline-secondary" ${pagination.page >= pagination.totalPages ? 'disabled' : ''}
+            <button type="button" class="btn btn-sm btn-outline-secondary" ${pagination.page >= pagination.totalPages ? 'disabled' : ''}
                 id="nextBookingPage">Next</button>
         `;
         document.getElementById('previousBookingPage')?.addEventListener('click', () => {
@@ -568,8 +608,12 @@
 
     
     async function cancelCurrentBooking() {
+        const cancelButton = document.getElementById('btnCancel');
+        if (!currentBookingId || cancelButton.disabled) return;
         if (!confirm(`Are you sure you want to cancel booking BKG-2026-${String(currentBookingId).padStart(4, '0')} for User #${currentUserId} (${currentHolderName})?`)) return;
 
+        cancelButton.disabled = true;
+        cancelButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Cancelling...';
         try {
             const response = await fetch(API_URL, {
                 method: 'PUT',
@@ -584,14 +628,16 @@
             let result = {};
             try { result = JSON.parse(text); } catch (e) {}
 
-            if (result.success === true) {
-                showAlert('warning', `<strong>Cancelled (PUT):</strong> Booking #${result.booking_id || currentBookingId} has been Cancelled. ${result.email_message || result.message || ''}`);
-                await loadLatestBooking();
-            } else {
-                showAlert('danger', `<strong>Error (PUT):</strong> ${result.message || 'Failed to cancel.'}`);
+            if (!response.ok || result.success !== true) {
+                throw new Error(result.message || `Failed to cancel booking (HTTP ${response.status}).`);
             }
+            showAlert('warning', `Booking #${result.booking_id || currentBookingId} has been cancelled. ${result.email_message || result.message || ''}`);
+            await loadLatestBooking();
         } catch (error) {
-            showAlert('danger', '<strong>Error:</strong> Failed to execute PUT request.');
+            showAlert('danger', `Cancellation error: ${error.message || 'Failed to execute the cancellation request.'}`);
+        } finally {
+            cancelButton.disabled = false;
+            cancelButton.textContent = 'Cancel Ticket';
         }
     }
 
@@ -600,6 +646,8 @@
     document.getElementById('event_id').addEventListener('change', calculateTotal);
     document.getElementById('quantity').addEventListener('input', calculateTotal);
     document.getElementById('refreshHistoryButton').addEventListener('click', loadLatestBooking);
+    document.getElementById('refreshTicketButton').addEventListener('click', loadLatestBooking);
+    document.getElementById('btnCancel').addEventListener('click', cancelCurrentBooking);
     document.getElementById('bookingSearch').addEventListener('input', () => {
         historyPage = 1;
         loadLatestBooking();

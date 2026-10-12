@@ -17,6 +17,18 @@ if (is_file($autoloadPath)) {
     require_once $autoloadPath;
 }
 
+function getJwtSecret()
+{
+    $secret = getenv("EVENT_BOOKING_JWT_SECRET");
+    if ($secret === false || trim($secret) === "") {
+        $secret = $_SERVER["EVENT_BOOKING_JWT_SECRET"] ?? "";
+    }
+    if (!is_string($secret) || trim($secret) === "") {
+        throw new RuntimeException("JWT secret is not configured.");
+    }
+    return $secret;
+}
+
 if (class_exists("Firebase\\JWT\\JWT")) {
     $jwtEncoder = function ($payload, $secretKey) {
         return \Firebase\JWT\JWT::encode($payload, $secretKey, "HS256");
@@ -72,8 +84,16 @@ $stmt->execute([$email]);
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
 $passwordMatches = $user
-    && (password_verify($password, $user["password"])
-        || hash_equals((string) $user["password"], (string) $password));
+    && password_verify($password, (string) $user["password"]);
+
+if (!$passwordMatches && $user && hash_equals((string) $user["password"], (string) $password)) {
+    $passwordMatches = true;
+    $rehashStmt = $conn->prepare("UPDATE users SET password = ? WHERE user_id = ?");
+    $rehashStmt->execute([
+        password_hash($password, PASSWORD_DEFAULT),
+        $user["user_id"]
+    ]);
+}
 
 if (!$passwordMatches) {
     $user = null;
@@ -94,7 +114,17 @@ if (!$user) {
 
 /* JWT */
 
-$secretKey = "event_booking_system_2026_super_secure_jwt_secret_key_123456789";
+try {
+    $secretKey = getJwtSecret();
+} catch (Throwable $e) {
+    error_log($e->getMessage());
+    http_response_code(500);
+    echo json_encode([
+        "success" => false,
+        "message" => "Authentication service is not configured"
+    ]);
+    exit;
+}
 
 $issuedAt = time();
 
@@ -102,6 +132,7 @@ $issuedAt = time();
 $payload = [
 
     "iat" => $issuedAt,
+    "exp" => $issuedAt + 3600,
 
     "user_id" => $user["user_id"],
 

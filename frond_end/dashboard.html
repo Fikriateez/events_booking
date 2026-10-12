@@ -28,7 +28,7 @@
             <a id="eventsLink" class="btn btn-outline-primary" href="events.html">Manage events</a>
             <a class="btn btn-outline-primary" href="venues.html">Check venues</a>
             <a class="btn btn-outline-primary" href="user.html">My account</a>
-            <button id="logoutButton" class="btn btn-outline-secondary">Logout</button>
+            <button id="logoutButton" type="button" class="btn btn-outline-secondary">Logout</button>
         </div>
     </header>
 
@@ -44,7 +44,7 @@
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <div><h2 class="h5 fw-bold mb-1">Events</h2><p class="text-secondary small mb-0">Monitor event status and ticket availability.</p></div>
-                <button id="refreshButton" class="btn btn-sm btn-outline-secondary">Refresh</button>
+                <button id="refreshButton" type="button" class="btn btn-sm btn-outline-secondary">Refresh</button>
             </div>
             <div class="table-responsive">
                 <table class="table align-middle mb-0">
@@ -84,6 +84,14 @@
     const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
     }[char]));
+    const bookingStatusClass = value => {
+        switch (String(value ?? '').toLowerCase()) {
+            case 'confirmed': return 'text-bg-success';
+            case 'pending': return 'text-bg-warning';
+            case 'cancelled': return 'text-bg-danger';
+            default: return 'text-bg-secondary';
+        }
+    };
     const showAlert = (type, message) => {
         const box = document.getElementById('alertBox');
         box.className = `alert alert-${type}`;
@@ -119,7 +127,7 @@
                     <div class="small text-secondary">${escapeHtml(booking.customer_email || booking.email || '')}</div></td>
                 <td>${escapeHtml(booking.quantity)}</td>
                 <td>RM ${Number(booking.total_price || 0).toFixed(2)}</td>
-                <td><span class="badge ${booking.booking_status === 'Cancelled' ? 'text-bg-danger' : 'text-bg-success'}">${escapeHtml(booking.booking_status)}</span></td></tr>
+                <td><span class="badge ${bookingStatusClass(booking.booking_status)}">${escapeHtml(booking.booking_status || 'Unknown')}</span></td></tr>
             `).join('') : '<tr><td colspan="6" class="text-secondary">No bookings found.</td></tr>';
         } catch (error) {
             showAlert('danger', error.message);

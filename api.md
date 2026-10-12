@@ -1,23 +1,23 @@
 # Shared backend API: Postman guide
 
-This guide covers **16 operations across six public PHP endpoint files** in the
-root `backend/`. It describes the current source implementation. The examples
-have not been sent to a live XAMPP/MySQL server from this workspace; native
-runtime verification remains pending.
+This guide is the **Postman demonstration script for the assessed RESTful API**.
+It covers the four required resources (`users`, `events`, `venues`, and
+`bookings`) plus login, with JSON request/response examples, role requirements,
+HTTP status codes, successful workflows, and negative tests. Use it alongside
+the exported Postman collection and screenshots for the project report.
 
 ## 1. Prepare the local application
 
-Complete the [root XAMPP setup](README.md#local-xampp-setup) and
-[guarded database initialization](docs/database-initialization.md) first:
+Complete the [root XAMPP setup](README.md#local-xampp-setup) first:
 
 - Start your configured Apache and MySQL/MariaDB services.
 - Install the locked Composer dependencies at the repository root.
-- Configure private `backend/config.local.php` with the correct database settings
-  and a new `JWT_SECRET` of at least 32 bytes.
-- Have an existing hashed-password Administrator account and an available venue.
-  The schema contains no demo accounts or venues. Follow
-  [first local accounts and venues](docs/database-initialization.md#first-local-accounts-and-venues)
-  if needed. Note the real venue ID and capacity.
+- Configure the database connection in `backend/db.php` for the local XAMPP
+  database and configure the same private `EVENT_BOOKING_JWT_SECRET` value for
+  Apache/PHP and the backend authentication code. Never place the secret in
+  Postman exports, screenshots, frontend code, or GitHub.
+- Start with an existing hashed-password Administrator account and an available
+  venue. Record the real venue ID and capacity from the database.
 
 Use a deliberately prepared local test database for this walkthrough: POST,
 PUT and DELETE requests change its records. You do not need SendGrid to test
@@ -34,7 +34,7 @@ values rather than sharing or exporting them. See the official
 
 | Variable | Value to enter |
 |---|---|
-| `base_url` | `http://localhost/web-api-project/backend` — no trailing slash |
+| `base_url` | `http://localhost/events_booking/backend` — no trailing slash |
 | `login_email` | Email of the existing Administrator initially; change when logging in as another account |
 | `login_password` | That account's private password |
 | `test_password` | A private password you choose for the new walkthrough accounts; use 12–72 bytes |
@@ -48,15 +48,16 @@ values rather than sharing or exporting them. See the official
 | `booking_id` | Save the returned `booking_id` here |
 | `cleanup_user_id` | Save a separate throwaway user's ID here for the deletion example |
 | `cleanup_event_id` | Save a separate unbooked event's ID here for the deletion example |
+| `cleanup_venue_id` | Save a separate unassigned venue's ID here for the deletion example |
 
 `{{base_url}}` means “use the value of the `base_url` environment variable.”
 For example, `{{base_url}}/login.php` becomes
-`http://localhost/web-api-project/backend/login.php`.
+`http://localhost/events_booking/backend/login.php`.
 
 Replace the host, port or folder to match your installation. If Apache uses port
-8080, an example base is `http://localhost:8080/web-api-project/backend`.
+8080, an example base is `http://localhost:8080/events_booking/backend`.
 From a different PC, use the XAMPP server's hostname/IP, for example
-`http://192.168.1.20/web-api-project/backend`; that address is illustrative.
+`http://192.168.1.20/events_booking/backend`; that address is illustrative.
 Keep any nested project path. `localhost` refers to the PC sending the request.
 Do not use the removed per-app backend directories.
 
@@ -65,7 +66,7 @@ Do not use the removed per-app backend directories.
 1. Create an HTTP request and choose its method, such as **GET** or **POST**.
 2. Paste the URL from the reference below. Copy only the URL into the URL field,
    not the method word shown in the request line.
-3. For login/registration, choose **Authorization → No Auth**. For protected
+3. For login, choose **Authorization → No Auth**. For protected
    requests, choose **Authorization → Bearer Token** and enter the indicated
    variable, such as `{{admin_token}}`, in the Token field. Enter only the token
    variable; Postman adds `Bearer` and the Authorization header. Do not add a
@@ -86,34 +87,39 @@ accounts or working inboxes. Use a new email if an earlier walkthrough created i
 
 ## 3. All request URLs at a glance
 
-“Manager” means Administrator, Organiser or Staff. Organiser/Staff may update or
-delete only their own events; Administrator may manage any event. All protected
-operations check the account's current database role.
+“Manager” means Administrator, Organiser or Staff. Organiser/Staff may create,
+update or delete only their own events; Administrator may manage any event and
+is the only role allowed to create, update or delete users and venues. All
+protected operations check the account's current database role.
 
 | No. | Method | URL | Access | Success |
 |---|---|---|---|---|
 | 1 | POST | `{{base_url}}/login.php` | Public login, any role | 200 |
-| 2 | POST | `{{base_url}}/register.php` | Public Customer registration | 201 |
-| 3 | GET | `{{base_url}}/test_auth.php` | Any authenticated role | 200 |
-| 4 | GET | `{{base_url}}/users.php` | Administrator | 200 |
-| 5 | GET | `{{base_url}}/users.php?id={{user_id}}` | Administrator | 200 |
-| 6 | POST | `{{base_url}}/users.php` | Administrator | 201 |
-| 7 | PUT | `{{base_url}}/users.php?id={{user_id}}` | Administrator | 200 |
-| 8 | DELETE | `{{base_url}}/users.php?id={{cleanup_user_id}}` | Administrator | 200 |
-| 9 | GET | `{{base_url}}/events.php` | Any authenticated role | 200 |
-| 10 | GET | `{{base_url}}/events.php?id={{event_id}}` | Any authenticated role | 200 |
-| 11 | POST | `{{base_url}}/events.php` | Manager | 201 |
-| 12 | PUT | `{{base_url}}/events.php?id={{event_id}}` | Manager; ownership applies | 200 |
-| 13 | DELETE | `{{base_url}}/events.php?id={{cleanup_event_id}}` | Manager; ownership applies | 200 |
-| 14 | GET | `{{base_url}}/bookings.php` | Customer | 200 |
-| 15 | POST | `{{base_url}}/bookings.php` | Customer | 200 |
-| 16 | PUT | `{{base_url}}/bookings.php` | Customer, own booking | 200 |
+| 2 | GET | `{{base_url}}/users.php` | Administrator | 200 |
+| 3 | GET | `{{base_url}}/users.php?id={{user_id}}` | Administrator | 200 |
+| 4 | POST | `{{base_url}}/users.php` | Administrator | 201 |
+| 5 | PUT | `{{base_url}}/users.php?id={{user_id}}` | Administrator | 200 |
+| 6 | DELETE | `{{base_url}}/users.php?id={{cleanup_user_id}}` | Administrator | 200 |
+| 7 | GET | `{{base_url}}/events.php` | Any authenticated role | 200 |
+| 8 | GET | `{{base_url}}/events.php?id={{event_id}}` | Any authenticated role | 200 |
+| 9 | POST | `{{base_url}}/events.php` | Organiser/Staff | 201 |
+| 10 | PUT | `{{base_url}}/events.php?id={{event_id}}` | Owner Manager/Admin | 200 |
+| 11 | DELETE | `{{base_url}}/events.php?id={{cleanup_event_id}}` | Owner Manager/Admin | 200 |
+| 12 | GET | `{{base_url}}/venues.php` | Any authenticated role | 200 |
+| 13 | POST | `{{base_url}}/venues.php` | Administrator | 201 |
+| 14 | PUT/PATCH | `{{base_url}}/venues.php?id={{venue_id}}` | Administrator | 200 |
+| 15 | DELETE | `{{base_url}}/venues.php?id={{cleanup_venue_id}}` | Administrator | 200 |
+| 16 | GET | `{{base_url}}/bookings.php` | Authenticated role | 200 |
+| 17 | POST | `{{base_url}}/bookings.php` | Customer | 200 |
+| 18 | PUT | `{{base_url}}/bookings.php` | Customer, own booking | 200 |
 
 Protected requests can return `401` for a missing/invalid/expired token and
 `403` for an unauthorized role. Other request-specific errors are listed below;
-the [troubleshooting table](#7-troubleshooting) covers common input/server errors.
+the [troubleshooting table](#8-troubleshooting) covers common input/server errors.
 IDs in responses may be numbers or digit strings; save the actual value without
-JSON quotes in the corresponding Postman ID variable.
+JSON quotes in the corresponding Postman ID variable. The current application
+does not expose a public registration endpoint or a standalone auth-test
+endpoint; do not add either to the Postman collection.
 
 ## 4. Request reference
 
@@ -167,48 +173,26 @@ accounts lose access, and role changes take effect on the next request. There
 is no refresh-token endpoint. Common errors: **400** for invalid/missing input;
 **401** for an incorrect email/password or unsupported stored role.
 
-### Request 2: Register a Customer
+### Legacy note: Registration is not supported
 
-```http
-POST {{base_url}}/register.php
-```
+`register.php` is not part of this application. Create test users with the
+Administrator `POST {{base_url}}/users.php` request below, then log in.
 
-**Authorization:** No Auth. **Body:** raw JSON.
+Do not send a registration request. Use the Administrator user-creation request
+below to create a Customer test account, then use the login request.
 
-```json
-{
-  "name": "Postman Customer",
-  "email": "customer.postman@example.test",
-  "password": "{{test_password}}",
-  "role": "Customer"
-}
-```
+### Legacy note: Standalone token test is not supported
 
-**Success: 201**, with `success`, `message` and top-level `user_id`. Save that ID
-if you want to inspect the account later. Registration does not return a token;
-log in using Request 1 and save the token in `customer_token`.
-
-`name`, `email` and `password` are required. Name/email are limited to 100
-characters; email must be valid. Passwords must be nonempty, at most 72 bytes,
-and contain no null byte. `role` is optional and defaults to `Customer`.
-Public registration cannot create privileged accounts: another role returns
-**400**. A duplicate email returns **409**.
-
-### Request 3: Check the current token and account
-
-```http
-GET {{base_url}}/test_auth.php
-```
+`test_auth.php` is not part of this application. Verify a token by calling any
+protected endpoint, such as `GET {{base_url}}/users.php` with `admin_token`.
 
 **Authorization:** Bearer Token, for example `{{admin_token}}`. **Body:** none.
 No query parameters are needed.
 
-**Success: 200**, with `success:true`, `message:"Token is valid"` and `user`
-containing `user_id`, `name`, `email`, `role`. No password/hash is returned.
-Repeat with each role's token to confirm the account. Missing/expired/invalid
-tokens and deleted accounts return **401**.
+Do not send a standalone token-test request. Verify each token through the
+protected resource request appropriate to that role.
 
-### Request 4: List all users
+### Request 2: List all users
 
 ```http
 GET {{base_url}}/users.php
@@ -221,7 +205,7 @@ GET {{base_url}}/users.php
 are excluded. User listing has no implemented search/filter/pagination options.
 A non-Administrator token returns **403**.
 
-### Request 5: Get one user
+### Request 3: Get one user
 
 ```http
 GET {{base_url}}/users.php?id={{user_id}}
@@ -234,7 +218,7 @@ ID of the user to inspect.
 `user_id`, `name`, `email`, `role`. An invalid ID returns **400**, a missing user
 **404**, and a non-Administrator **403**.
 
-### Request 6: Create a user as Administrator
+### Request 4: Create a user as Administrator
 
 ```http
 POST {{base_url}}/users.php
@@ -255,13 +239,13 @@ POST {{base_url}}/users.php
 Organiser's ID in `user_id`. Repeat to create Staff, changing name/email and
 `role` to `Staff`; do not overwrite the Organiser's saved `user_id`.
 
-`name`, `email`, `password` are required and use the registration validation
+`name`, `email`, `password` are required and use the user-creation validation
 rules. `role` may be `Administrator`, `Organiser`, `Staff` or `Customer`, with
 exact casing; omitting it defaults to `Customer`. Only an Administrator can
 create privileged accounts. Invalid fields/role return **400**, a wrong caller
 role **403**, and an existing email **409**. No token is returned; log in next.
 
-### Request 7: Update a user
+### Request 5: Update a user
 
 ```http
 PUT {{base_url}}/users.php?id={{user_id}}
@@ -287,7 +271,7 @@ Missing/invalid ID or fields return **400**, wrong caller role **403**, missing
 user **404**, and conflicting email **409**. Demoting a user changes what their
 already-issued token can access on the next request.
 
-### Request 8: Delete an unreferenced test user
+### Request 6: Delete an unreferenced test user
 
 ```http
 DELETE {{base_url}}/users.php?id={{cleanup_user_id}}
@@ -305,7 +289,7 @@ Missing/invalid ID returns **400**, wrong caller role **403**, missing user
 **404**, and any dependent event/booking record **409**. Referenced records are
 preserved, including references from cancelled bookings.
 
-### Request 9: List, filter and sort events
+### Request 7: List, filter and sort events
 
 ```http
 GET {{base_url}}/events.php
@@ -346,7 +330,7 @@ filtering for an unpublished status receive an empty list. Invalid parameters
 return **400**, commonly with `errors:[{"field":"...","message":"..."}]`.
 Event status values are case-sensitive: `Published` is invalid.
 
-### Request 10: Get one event
+### Request 8: Get one event
 
 ```http
 GET {{base_url}}/events.php?id={{event_id}}
@@ -361,7 +345,7 @@ including venue name/location and `available_tickets`. An invalid ID returns
 **400**. A missing event returns **404**; a Customer also gets **404** for an
 event that is not published.
 
-### Request 11: Create a published event
+### Request 9: Create a published event
 
 ```http
 POST {{base_url}}/events.php
@@ -403,7 +387,7 @@ object in `data`. Save **`data.event_id`** in `event_id`; there is no top-level
 `event_id`. Invalid fields/capacity return **400**, Customer access **403**,
 missing venue **404**, and an unavailable venue **409**.
 
-### Request 12: Update an event
+### Request 10: Update an event
 
 ```http
 PUT {{base_url}}/events.php?id={{event_id}}
@@ -420,7 +404,7 @@ PUT {{base_url}}/events.php?id={{event_id}}
 
 Unlike user updates, send only the fields you want to change. Supported fields
 are `title`, `description`, `venue_id`, `event_date`, `ticket_price`,
-`total_tickets`, `status`, with the rules described in Request 11. Send at least
+`total_tickets`, `status`, with the rules described in Request 9. Send at least
 one supported field. The server coordinates availability when capacity changes;
 do not send `available_tickets` or `organiser_id`.
 
@@ -431,7 +415,7 @@ capacity below active booked quantity, an unavailable replacement venue or
 inconsistent inventory **409**. Changing event status does not automatically
 cancel bookings or issue refunds. Editing price does not rewrite old booking totals.
 
-### Request 13: Delete a separate unbooked event
+### Request 11: Delete a separate unbooked event
 
 ```http
 DELETE {{base_url}}/events.php?id={{cleanup_event_id}}
@@ -440,7 +424,7 @@ DELETE {{base_url}}/events.php?id={{cleanup_event_id}}
 **Authorization:** the manager who created that event, or `{{admin_token}}`.
 **Body:** none. Query `id` is required.
 
-First repeat Request 11 to create another event, changing the title to
+First repeat Request 9 to create another event, changing the title to
 `Postman Cleanup Event` and status to `draft`. Save its returned `data.event_id`
 in **`cleanup_event_id`**, leaving the main `event_id` unchanged. Do not book it.
 
@@ -450,7 +434,7 @@ Missing/invalid ID returns **400**, wrong role/ownership **403**, missing event
 **Cancelled bookings still prevent event deletion.** Setting an event's status
 to `cancelled` is available when deletion is blocked; it does not cancel its bookings.
 
-### Request 14: View your booking history
+### Request 12: View your booking history
 
 ```http
 GET {{base_url}}/bookings.php
@@ -485,7 +469,7 @@ implemented `user_id` or detail `id` filter here. Search by booking number to
 find a particular booking. Invalid pagination/status returns **400**, and any
 non-Customer token returns **403**.
 
-### Request 15: Create a booking
+### Request 13: Create a booking
 
 ```http
 POST {{base_url}}/bookings.php
@@ -510,8 +494,8 @@ from the account, calculates the total from the stored price, and creates a
 Save **`booking_id`** in the environment. With two tickets at RM 12.34,
 `total_price` is the JSON number `24.68`.
 
-Booking/stock changes commit together. Read Request 10 afterward: the sample
-event's availability becomes 8 if no other requests changed it. Use Request 14
+Booking/stock changes commit together. Read Request 8 afterward: the sample
+event's availability becomes 8 if no other requests changed it. Use Request 12
 to inspect persisted quantities/totals; history may return decimal values as
 strings, which does not change their monetary value.
 
@@ -520,7 +504,7 @@ Invalid ID/quantity or an overflowing total returns **400**, non-Customer access
 inventory **409**. A missing event on booking creation uses **409**, even though
 event-detail retrieval would use 404. Email failure does not undo booking success.
 
-### Request 16: Cancel your booking
+### Request 14: Cancel your booking
 
 ```http
 PUT {{base_url}}/bookings.php
@@ -541,42 +525,145 @@ PUT {{base_url}}/bookings.php
 
 **Success: 200**, with `success`, `message`, `booking_id`, `email_type`,
 `email_subject`, `email_sent`, `email_message`. Cancellation does not include a
-`total_price` field; retrieve the persisted amount through Request 14. The exact
+`total_price` field; retrieve the persisted amount through Request 12. The exact
 booking becomes `Cancelled` and its ticket quantity is restored once. For the
-sample, Request 10 shows availability 10 again, assuming no other changes.
+sample, Request 8 shows availability 10 again, assuming no other changes.
 
 Invalid ID/status returns **400**, a non-Customer **403**, missing/foreign booking
 **404**, and an already-cancelled booking or inconsistent inventory **409**.
 Repeating this PUT does not restore stock again. Cancellation is not deletion
 and does not process a payment refund.
 
-## 5. Suggested walkthrough order
+### Request 15: List venues
+
+```http
+GET {{base_url}}/venues.php?page=1&limit=10&search=&status=Available&min_capacity=10&sort=venue_name&order=asc
+```
+
+**Authorization:** any authenticated role. **Body:** none.
+
+**Success: 200** returns `success`, `data` and `pagination`. Venue rows include
+`venue_id`, `venue_name`, `location`, `capacity` and `status`. Supported list
+parameters are `page`, `limit` (maximum 100), `search`, `status`,
+`min_capacity`, `sort` and `order`. Invalid values return **400**.
+
+### Request 16: Create a venue as Administrator
+
+```http
+POST {{base_url}}/venues.php
+```
+
+**Authorization:** `{{admin_token}}`. **Body:** raw JSON.
+
+```json
+{
+  "venue_name": "Postman Demonstration Hall",
+  "location": "Local Test Campus",
+  "capacity": 100,
+  "status": "Available"
+}
+```
+
+**Success: 201** returns the created venue in `data`. Save its `venue_id` only
+if it is a separate venue for the demonstration. A non-Administrator receives
+**403**; invalid fields return **400** and a duplicate venue returns **409**.
+
+### Request 17: Update a venue
+
+```http
+PUT {{base_url}}/venues.php?id={{venue_id}}
+```
+
+**Authorization:** `{{admin_token}}`. **Body:** raw JSON.
+
+```json
+{
+  "venue_name": "Postman Demonstration Hall Updated",
+  "location": "Local Test Campus",
+  "capacity": 120,
+  "status": "Available"
+}
+```
+
+`PATCH` is also supported for a partial update. Do not reduce capacity below
+the ticket capacity of an assigned event. **Success: 200**; invalid data returns
+**400**, a capacity/status conflict returns **409**, and a missing venue returns
+**404**.
+
+### Request 18: Delete a separate venue
+
+```http
+DELETE {{base_url}}/venues.php?id={{cleanup_venue_id}}
+```
+
+**Authorization:** `{{admin_token}}`. **Body:** none. Use only a throwaway venue
+with no assigned events. **Success: 200**. A venue with related events cannot be
+deleted and returns **409**.
+
+## 5. Suggested Postman demonstration order
 
 The reference numbers above group endpoints. For a first run, follow this order:
 
 1. **Administrator login:** Request 1 with your existing account; save
-   `admin_token`. Confirm its role using Request 3.
-2. **Create managers:** Request 6 once for Organiser and again for Staff. Keep
-   the Organiser's returned ID in `user_id`. Try Requests 4, 5 and 7 as Admin.
-3. **Register Customer:** Request 2. Use unique test emails if rerunning.
+   `admin_token`. Verify it by calling Request 2.
+2. **Create managers:** Request 4 once for Organiser and again for Staff. Keep
+   the Organiser's returned ID in `user_id`. Try Requests 2, 3 and 5 as Admin.
+3. **Create a Customer:** Request 4 as Administrator. Use a unique test email
+   if rerunning.
 4. **Log in as each new account:** Request 1 using each created email and the
    chosen `test_password` as `login_password`. Save the respective Organiser,
-   Staff and Customer tokens. Request 3 confirms each role. Changing login
+   Staff and Customer tokens. Use Request 7 or Request 12 to confirm each role's
+   access. Changing login
    variables does not change the other tokens you already saved.
-5. **Publish:** Request 11 with `organiser_token` and the actual `venue_id`.
+5. **Venue evidence:** Request 15 with each role, then Requests 16–18 with
+   `admin_token` and separate cleanup venue data.
+6. **Publish:** Request 9 with `organiser_token` and the actual `venue_id`.
    Save `data.event_id` in `event_id`.
-6. **Browse/update:** Requests 9 and 10 with Customer and Organiser tokens;
-   Request 12 with the event owner's token. Keep the event published for booking.
-7. **Book:** Request 15 with Customer token; save `booking_id`. Read Requests
-   10 and 14 to check stock and persisted booking details.
-8. **Cancel:** Request 16 with the same Customer token. Check Request 14 with
-   `status=Cancelled` and Request 10 for restored availability. A repeated
+7. **Browse/update:** Requests 7 and 8 with Customer and Organiser tokens;
+   Request 10 with the event owner's token. Keep the event published for booking.
+8. **Book:** Request 13 with Customer token; save `booking_id`. Read Requests
+   8 and 12 to check stock and persisted booking details.
+9. **Cancel:** Request 14 with the same Customer token. Check Request 12 with
+   `status=Cancelled` and Request 8 for restored availability. A repeated
    cancellation should return 409.
-9. **Test deletion separately:** Create the throwaway user and unbooked event
-   described in Requests 8 and 13, save their separate cleanup IDs, then delete
-   those records. Deleting the main booked event returns 409 even after cancellation.
+10. **Test deletion separately:** Create the throwaway user with Request 4 and
+   the unbooked event with Request 9, save their separate cleanup IDs, then use
+   Requests 6 and 11 to delete those records. Deleting the main booked event
+   returns 409 even after cancellation.
 
-## 6. OPTIONS and URLs that are not resource endpoints
+## 6. Evidence to capture for the project report
+
+The marking rubric requires a complete Postman collection, reproducible
+documentation, successful tests, failed/error tests, and debugging evidence.
+Capture screenshots with the request URL, method, Authorization setting, JSON
+body, HTTP status, and response body visible.
+
+Capture at least these demonstrations:
+
+| Evidence | Postman demonstration |
+|---|---|
+| Authentication | Successful Administrator, Organiser/Staff and Customer logins; one invalid-password **401** |
+| Role control | Customer calling `POST users.php` or `POST venues.php` (**403**) |
+| Users | Admin list, create, update, and delete a separate unreferenced user |
+| Events | Filter/search/pagination list, create, update, and delete a separate unbooked event |
+| Venues | List/filter, Admin create/update/delete, and a non-admin write attempt (**403**) |
+| Bookings | Customer list, create, cancellation, repeated cancellation (**409**), and insufficient-stock/invalid-input error |
+| Validation | Malformed JSON or missing required fields (**400**) and missing resource (**404**) |
+
+After testing, use Postman **Collections → Export**, choose Collection v2.1,
+and keep the exported JSON with the submission. Do not export active passwords,
+JWT values, SendGrid keys, or Apache environment values. Use environment
+variables and clear their current values before sharing screenshots or exports.
+The report should explain the root cause and fix for each significant bug found,
+including booking transaction/stock consistency, cancellation ownership, JWT
+configuration, and email failure not rolling back committed booking changes.
+
+The project also requires evidence of the genuine external API integration.
+For this system, show the SendGrid request code, the booking/cancellation JSON
+fields `email_sent` and `email_message`, and a screenshot of the resulting
+response. Never expose the SendGrid API key.
+
+## 7. OPTIONS and URLs that are not resource endpoints
 
 Every public endpoint supports **OPTIONS** for preflight. For example:
 
@@ -594,14 +681,13 @@ Unsupported methods return **405**, such as `PATCH users.php`, `GET login.php`
 or `DELETE bookings.php`. The optional `Origin` header is unnecessary for normal
 Postman requests; sending an unapproved origin can produce **403**.
 
-`auth.php`, `db.php`, configuration files and `backend/lib/` are internal helpers,
-not public API resources; Apache denies direct access. There is no `venues.php`
-CRUD API, booking DELETE/detail endpoint, payment API, logout endpoint or token
-refresh endpoint. Logout in a client removes its saved token; it does not revoke
-an otherwise valid JWT server-side. Use the manual local setup for initial venues.
-The original per-app backend URL directories remain disabled.
+`auth.php`, `db.php` and configuration files are internal helpers, not public
+API resources. There is no booking DELETE/detail endpoint, payment API, logout
+endpoint or token refresh endpoint. Logout in a client removes its saved token;
+it does not revoke an otherwise valid JWT server-side. The original per-app
+backend URL directories remain disabled.
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 | Result | What to check |
 |---|---|
@@ -615,7 +701,7 @@ The original per-app backend URL directories remain disabled.
 | `413` | JSON request body exceeds the 1 MiB limit |
 | `415` | Select raw JSON and send `Content-Type: application/json`, not form-data or URL-encoded data |
 | `500` — `Backend configuration is invalid` | Private PHP configuration returns an array; values are strings/integers; DB_PORT is 1–65535; APP_TIMEZONE is valid, such as Asia/Kuala_Lumpur; check overriding Apache/process environment values |
-| `500` — `Backend authentication is not configured` | Set a private JWT_SECRET of at least 32 bytes; this is a different error from invalid configuration |
+| `500` — `Authentication service is not configured` | Set the same private `EVENT_BOOKING_JWT_SECRET` value for Apache/PHP and both JWT endpoints; restart Apache after changing it |
 | `500` — dependency/database errors | Install root Composer dependencies; verify PHP extensions, MySQL service, database existence and private connection settings; do not reset an existing database |
 | `200`, `success:true`, `email_sent:false` | Booking/cancellation succeeded; investigate mail settings separately rather than resending the mutation |
 
@@ -629,10 +715,5 @@ in API errors.
 For successful booking/cancellation, `email_sent:true` means SendGrid accepted
 the request, not confirmed inbox delivery. The example `.test` addresses are
 not controlled inboxes. If validating actual delivery, deliberately use your
-controlled recipient and configured verified sender. See
-[notification behavior](docs/bookings.md) and
-[native runtime/readiness procedure](docs/regression.md).
-
-Use [finalization evidence](docs/finalization.md) for the existing isolated
-regression coverage. This documentation adds no live Postman, MySQL or SendGrid
-test result and does not change backend behavior.
+controlled recipient and configured verified sender. Use the Postman screenshots and exported collection as the runtime evidence for
+the report. This documentation does not change backend behavior.

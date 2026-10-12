@@ -20,8 +20,8 @@
 </head>
 <body class="py-4">
 <main class="container" style="max-width: 1150px;">
-    <nav class="d-flex justify-content-between mb-4"><a id="dashboardLink" class="btn btn-outline-secondary" href="dashboard.html">Dashboard</a><button id="logoutButton" class="btn btn-outline-secondary">Logout</button></nav>
-    <div class="d-flex justify-content-between align-items-end mb-4"><div><span class="badge bg-primary-subtle text-primary mb-2">Users</span><h1 class="h3 fw-bold mb-1">User Management</h1><p id="userSummary" class="text-secondary small mb-0"></p></div><button id="newUserButton" class="btn btn-primary d-none" data-bs-toggle="modal" data-bs-target="#userModal">Assign user</button></div>
+    <nav class="d-flex justify-content-between mb-4"><a id="dashboardLink" class="btn btn-outline-secondary" href="dashboard.html">Dashboard</a><button id="logoutButton" type="button" class="btn btn-outline-secondary">Logout</button></nav>
+    <div class="d-flex justify-content-between align-items-end mb-4"><div><span class="badge bg-primary-subtle text-primary mb-2">Users</span><h1 class="h3 fw-bold mb-1">User Management</h1><p id="userSummary" class="text-secondary small mb-0"></p></div><button id="newUserButton" type="button" class="btn btn-primary d-none" data-bs-toggle="modal" data-bs-target="#userModal">Assign user</button></div>
     <div id="alertBox" class="alert d-none" role="alert"></div>
     <section class="card card-custom shadow-sm"><div class="card-body">
         <div id="profileCard" class="d-none row g-3"></div>
@@ -34,7 +34,7 @@
 <div class="modal fade" id="userModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><form id="userForm">
     <div class="modal-header"><h2 id="modalTitle" class="modal-title h5">Assign user</h2><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
     <div class="modal-body"><input id="userId" type="hidden"><div class="mb-3"><label class="form-label">Name</label><input id="name" class="form-control" required maxlength="100"></div><div class="mb-3"><label class="form-label">Email</label><input id="email" type="email" class="form-control" required></div><div class="mb-3"><label class="form-label">Role</label><select id="role" class="form-select"><option>Customer</option><option>Organiser</option><option>Staff</option><option>Administrator</option></select></div><div><label class="form-label">Password</label><input id="password" type="password" class="form-control" minlength="6" placeholder="Required for new users"></div></div>
-    <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button class="btn btn-primary">Save user</button></div>
+    <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Save user</button></div>
 </form></div></div></div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
@@ -50,14 +50,28 @@
     document.getElementById('userSummary').textContent = `${currentUser.name} (${currentUser.role})`;
     document.getElementById('logoutButton').addEventListener('click', () => { sessionStorage.clear(); window.location.href = 'login.html'; });
     function renderProfile(user) {
-        document.getElementById('profileCard').innerHTML = `<div class="col-md-3"><div class="text-secondary small">Name</div><strong>${user.name}</strong></div><div class="col-md-4"><div class="text-secondary small">Email</div><strong>${user.email}</strong></div><div class="col-md-3"><div class="text-secondary small">Role</div><strong>${user.role}</strong></div><div class="col-md-2"><div class="text-secondary small">User ID</div><strong>#${user.user_id}</strong></div>`;
-        document.getElementById('profileCard').classList.remove('d-none');
+        const card = document.getElementById('profileCard');
+        card.replaceChildren();
+        [['Name', user.name], ['Email', user.email], ['Role', user.role], ['User ID', `#${user.user_id ?? '-'}`]]
+            .forEach(([label, value], index) => {
+                const column = document.createElement('div');
+                column.className = `col-md-${index === 1 ? 4 : index === 3 ? 2 : 3}`;
+                const labelElement = document.createElement('div');
+                labelElement.className = 'text-secondary small';
+                labelElement.textContent = label;
+                const valueElement = document.createElement('strong');
+                valueElement.textContent = String(value ?? '-');
+                column.append(labelElement, valueElement);
+                card.appendChild(column);
+            });
+        card.classList.remove('d-none');
     }
     async function loadUsers() {
         try {
             const response = await fetch(API, { headers });
             const result = await response.json();
             if (!response.ok || result.success !== true) throw new Error(result.message || 'Unable to load users.');
+            if (!result.data || (role === 'administrator' && !Array.isArray(result.data))) throw new Error('The users response was invalid.');
             if (role !== 'administrator') { renderProfile(result.data); return; }
             document.getElementById('usersSection').classList.remove('d-none');
             document.getElementById('newUserButton').classList.remove('d-none');
@@ -67,15 +81,72 @@
     function renderUsers(users) {
         const query = document.getElementById('searchInput').value.toLowerCase();
         const visible = users.filter(user => `${user.name} ${user.email} ${user.role}`.toLowerCase().includes(query));
-        document.getElementById('usersTable').innerHTML = visible.length ? visible.map(user => `<tr><td>${user.name}</td><td>${user.email}</td><td><span class="badge text-bg-secondary">${user.role}</span></td><td class="text-end text-nowrap"><button class="btn btn-sm btn-outline-primary" onclick='editUser(${JSON.stringify(user)})'>Edit</button> <button class="btn btn-sm btn-outline-danger" onclick="deleteUser(${user.user_id})">Delete</button></td></tr>`).join('') : '<tr><td colspan="4" class="text-secondary">No users found.</td></tr>';
+        const table = document.getElementById('usersTable');
+        table.replaceChildren();
+        if (!visible.length) {
+            const row = table.insertRow();
+            const cell = row.insertCell();
+            cell.colSpan = 4;
+            cell.className = 'text-secondary';
+            cell.textContent = 'No users found.';
+            return;
+        }
+        visible.forEach(user => {
+            const row = table.insertRow();
+            [user.name, user.email].forEach(value => {
+                const cell = row.insertCell();
+                cell.textContent = String(value ?? '-');
+            });
+            const roleCell = row.insertCell();
+            const badge = document.createElement('span');
+            badge.className = 'badge text-bg-secondary';
+            badge.textContent = String(user.role ?? '-');
+            roleCell.appendChild(badge);
+            const actions = row.insertCell();
+            actions.className = 'text-end text-nowrap';
+            const editButton = document.createElement('button');
+            editButton.className = 'btn btn-sm btn-outline-primary';
+            editButton.type = 'button';
+            editButton.textContent = 'Edit';
+            editButton.addEventListener('click', () => { resetForm(user); modal.show(); });
+            const deleteButton = document.createElement('button');
+            deleteButton.className = 'btn btn-sm btn-outline-danger ms-1';
+            deleteButton.type = 'button';
+            deleteButton.textContent = 'Delete';
+            deleteButton.addEventListener('click', () => deleteUser(user.user_id));
+            actions.append(editButton, deleteButton);
+        });
     }
     function resetForm(user = null) {
         document.getElementById('userForm').reset(); document.getElementById('userId').value = user?.user_id || ''; document.getElementById('modalTitle').textContent = user ? 'Edit user' : 'Assign user'; document.getElementById('password').required = !user;
         if (user) { document.getElementById('name').value = user.name; document.getElementById('email').value = user.email; document.getElementById('role').value = user.role; }
     }
-    async function editUser(user) { resetForm(user); modal.show(); }
-    async function deleteUser(id) { if (!confirm('Delete this user?')) return; const response = await fetch(`${API}?id=${id}`, { method: 'DELETE', headers }); const result = await response.json(); if (!response.ok || result.success !== true) return showAlert('danger', result.message || 'Unable to delete user.'); showAlert('success', result.message); loadUsers(); }
-    document.getElementById('userForm').addEventListener('submit', async event => { event.preventDefault(); const id = document.getElementById('userId').value; const data = { name: document.getElementById('name').value.trim(), email: document.getElementById('email').value.trim(), role: document.getElementById('role').value, password: document.getElementById('password').value }; const response = await fetch(id ? `${API}?id=${id}` : API, { method: id ? 'PUT' : 'POST', headers, body: JSON.stringify(data) }); const result = await response.json(); if (!response.ok || result.success !== true) return showAlert('danger', result.message || 'Unable to save user.'); modal.hide(); showAlert('success', result.message); loadUsers(); });
+    async function deleteUser(id) {
+        if (!confirm('Delete this user?')) return;
+        try {
+            const response = await fetch(`${API}?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers, body: JSON.stringify({}) });
+            const result = await response.json();
+            if (!response.ok || result.success !== true) throw new Error(result.message || 'Unable to delete user.');
+            showAlert('success', result.message || 'User deleted.');
+            await loadUsers();
+        } catch (error) { showAlert('danger', error.message || 'Unable to delete user.'); }
+    }
+    document.getElementById('userForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        const id = document.getElementById('userId').value;
+        const data = { name: document.getElementById('name').value.trim(), email: document.getElementById('email').value.trim(), role: document.getElementById('role').value, password: document.getElementById('password').value };
+        const submitButton = event.currentTarget.querySelector('button[type="submit"]');
+        submitButton.disabled = true;
+        try {
+            const response = await fetch(id ? `${API}?id=${encodeURIComponent(id)}` : API, { method: id ? 'PUT' : 'POST', headers, body: JSON.stringify(data) });
+            const result = await response.json();
+            if (!response.ok || result.success !== true) throw new Error(result.message || 'Unable to save user.');
+            modal.hide();
+            showAlert('success', result.message || 'User saved.');
+            await loadUsers();
+        } catch (error) { showAlert('danger', error.message || 'Unable to save user.'); }
+        finally { submitButton.disabled = false; }
+    });
     document.getElementById('newUserButton').addEventListener('click', () => resetForm());
     document.getElementById('searchInput').addEventListener('input', loadUsers);
     if (role === 'administrator') loadUsers(); else { document.getElementById('profileCard').classList.remove('d-none'); loadUsers(); }

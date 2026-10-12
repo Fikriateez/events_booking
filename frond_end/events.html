@@ -24,12 +24,12 @@
         <a id="dashboardLink" class="btn btn-outline-secondary" href="dashboard.html">Dashboard</a>
         <div class="d-flex gap-2">
             <a class="btn btn-outline-primary" href="user.html">My account</a>
-            <button id="logoutButton" class="btn btn-outline-secondary">Logout</button>
+            <button id="logoutButton" type="button" class="btn btn-outline-secondary">Logout</button>
         </div>
     </nav>
     <div class="d-flex justify-content-between align-items-end mb-4">
         <div><span class="badge bg-primary-subtle text-primary mb-2">Events</span><h1 class="h3 fw-bold mb-1">Event Management</h1><p id="userSummary" class="text-secondary small mb-0"></p></div>
-        <button id="newEventButton" class="btn btn-primary d-none" data-bs-toggle="modal" data-bs-target="#eventModal">Create event</button>
+        <button id="newEventButton" type="button" class="btn btn-primary d-none" data-bs-toggle="modal" data-bs-target="#eventModal">Create event</button>
     </div>
     <div id="alertBox" class="alert d-none" role="alert"></div>
     <section class="card card-custom shadow-sm">
@@ -37,7 +37,7 @@
             <div class="row g-2 mb-3">
                 <div class="col-md-6"><input id="searchInput" class="form-control" placeholder="Search events"></div>
                 <div class="col-md-3"><select id="statusFilter" class="form-select"><option value="">All statuses</option><option>draft</option><option>published</option><option>cancelled</option><option>completed</option></select></div>
-                <div class="col-md-3"><button id="refreshButton" class="btn btn-outline-secondary w-100">Refresh</button></div>
+                <div class="col-md-3"><button id="refreshButton" type="button" class="btn btn-outline-secondary w-100">Refresh</button></div>
             </div>
             <div class="table-responsive">
                 <table class="table align-middle">
@@ -64,7 +64,7 @@
                     <div class="col-md-6"><label class="form-label">Total tickets</label><input id="totalTickets" class="form-control" type="number" min="1" required></div>
                 </div>
             </div>
-            <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button class="btn btn-primary">Save event</button></div>
+            <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Save event</button></div>
         </form>
     </div></div>
 </div>
@@ -101,8 +101,8 @@
                 <td>${escapeHtml(formatDate(event.event_date))}</td><td>${escapeHtml(event.venue_name)}</td>
                 <td><span class="badge text-bg-secondary">${escapeHtml(event.status)}</span></td>
                 <td>${event.available_tickets} / ${event.total_tickets}</td>                <td class="text-end text-nowrap">${canManageEvent(event) ? `
-                <button class="btn btn-sm btn-outline-primary" onclick="editEvent(${event.event_id})">Edit</button>
-                <button class="btn btn-sm btn-outline-danger" onclick="deleteEvent(${event.event_id})">Delete</button>` : '<span class="text-secondary small">View only</span>'}</td></tr>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="editEvent(${event.event_id})">Edit</button>
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteEvent(${event.event_id})">Delete</button>` : '<span class="text-secondary small">View only</span>'}</td></tr>
             `).join('') : '<tr><td colspan="6" class="text-secondary">No events found.</td></tr>';
         } catch (error) { showAlert('danger', error.message); }
     }
@@ -149,17 +149,21 @@
         }
     }
     async function editEvent(id) {
-        const response = await fetch(`${API}?id=${id}`, { headers });
-        const result = await response.json();
-        if (!response.ok || result.success !== true) return showAlert('danger', result.message || 'Unable to load event.');
-        resetForm(result.data); modal.show();
+        try {
+            const response = await fetch(`${API}?id=${encodeURIComponent(id)}`, { headers });
+            const result = await response.json();
+            if (!response.ok || result.success !== true) throw new Error(result.message || 'Unable to load event.');
+            resetForm(result.data); modal.show();
+        } catch (error) { showAlert('danger', error.message || 'Unable to load event.'); }
     }
     async function deleteEvent(id) {
         if (!confirm('Delete this event? Events with booking records cannot be deleted.')) return;
-        const response = await fetch(`${API}?id=${id}`, { method: 'DELETE', headers });
-        const result = await response.json();
-        if (!response.ok || result.success !== true) return showAlert('danger', result.message || 'Unable to delete event.');
-        showAlert('success', result.message); loadEvents();
+        try {
+            const response = await fetch(`${API}?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers });
+            const result = await response.json();
+            if (!response.ok || result.success !== true) throw new Error(result.message || 'Unable to delete event.');
+            showAlert('success', result.message || 'Event deleted.'); loadEvents();
+        } catch (error) { showAlert('danger', error.message || 'Unable to delete event.'); }
     }
     // The table uses inline handlers, so expose only these guarded actions.
     window.editEvent = editEvent;
@@ -168,10 +172,12 @@
         event.preventDefault();
         const id = document.getElementById('eventId').value;
         const data = { title: document.getElementById('title').value.trim(), description: document.getElementById('description').value.trim(), venue_id: Number(document.getElementById('venueId').value), event_date: document.getElementById('eventDate').value.replace('T', ' ') + ':00', ticket_price: Number(document.getElementById('ticketPrice').value), total_tickets: Number(document.getElementById('totalTickets').value), status: document.getElementById('status').value };
-        const response = await fetch(id ? `${API}?id=${id}` : API, { method: id ? 'PUT' : 'POST', headers, body: JSON.stringify(data) });
-        const result = await response.json();
-        if (!response.ok || result.success !== true) return showAlert('danger', result.message || 'Unable to save event.');
-        modal.hide(); showAlert('success', result.message); loadEvents();
+        try {
+            const response = await fetch(id ? `${API}?id=${encodeURIComponent(id)}` : API, { method: id ? 'PUT' : 'POST', headers, body: JSON.stringify(data) });
+            const result = await response.json();
+            if (!response.ok || result.success !== true) throw new Error(result.message || 'Unable to save event.');
+            modal.hide(); showAlert('success', result.message || 'Event saved.'); loadEvents();
+        } catch (error) { showAlert('danger', error.message || 'Unable to save event.'); }
     });
     document.getElementById('newEventButton').addEventListener('click', () => resetForm());
     document.getElementById('newEventButton').classList.toggle('d-none', !['organiser', 'staff'].includes(role));

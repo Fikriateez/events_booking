@@ -384,39 +384,54 @@ try {
             ]);
         }
 
-        $stmt = $conn->prepare(
-            "INSERT INTO events
-             (title, description, venue_id, organiser_id, event_date,
-              ticket_price, total_tickets, available_tickets, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        );
-
         $totalTickets = intval($data["total_tickets"]);
+        $eventStatus = $data["status"] ?? "draft";
 
-        // organiser_id always comes from the JWT, never from the request body
-        $stmt->execute([
-            trim($data["title"]),
-            $data["description"] ?? null,
-            intval($data["venue_id"]),
-            $currentUser->user_id,
-            date("Y-m-d H:i:s", strtotime($data["event_date"])),
-            $data["ticket_price"],
-            $totalTickets,
-            $totalTickets,
-            $data["status"] ?? "draft"
-        ]);
+        $conn->beginTransaction();
+        try {
+            $stmt = $conn->prepare(
+                "INSERT INTO events
+                 (title, description, venue_id, organiser_id, event_date,
+                  ticket_price, total_tickets, available_tickets, status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            );
 
-        syncVenueStatusForEvent(
-            $conn,
-            $conn->lastInsertId(),
-            intval($data["venue_id"]),
-            $data["status"] ?? "draft"
-        );
+            // organiser_id always comes from the JWT, never from the request body
+            $stmt->execute([
+                trim($data["title"]),
+                $data["description"] ?? null,
+                intval($data["venue_id"]),
+                $currentUser->user_id,
+                date("Y-m-d H:i:s", strtotime($data["event_date"])),
+                $data["ticket_price"],
+                $totalTickets,
+                $totalTickets,
+                $eventStatus
+            ]);
+            $newEventId = (int) $conn->lastInsertId();
+
+            syncVenueStatusForEvent(
+                $conn,
+                $newEventId,
+                intval($data["venue_id"]),
+                $eventStatus
+            );
+            $newEvent = fetchEvent($conn, $newEventId);
+            if (!$newEvent) {
+                throw new RuntimeException("Created event could not be loaded.");
+            }
+            $conn->commit();
+        } catch (Throwable $e) {
+            if ($conn->inTransaction()) {
+                $conn->rollBack();
+            }
+            throw $e;
+        }
 
         sendJson(201, [
             "success" => true,
             "message" => "Event created",
-            "data" => fetchEvent($conn, $conn->lastInsertId())
+            "data" => $newEvent
         ]);
     }
 
@@ -538,14 +553,26 @@ try {
 
         $params[] = $id;
 
-        $stmt = $conn->prepare("UPDATE events SET " . implode(", ", $sets) . " WHERE event_id = ?");
-        $stmt->execute($params);
+        $conn->beginTransaction();
+        try {
+            $stmt = $conn->prepare("UPDATE events SET " . implode(", ", $sets) . " WHERE event_id = ?");
+            $stmt->execute($params);
 
-        $updatedEvent = fetchEvent($conn, $id);
-        if (array_key_exists("venue_id", $data) && intval($event["venue_id"]) !== intval($newVenueId)) {
-            releaseVenueIfUnused($conn, intval($event["venue_id"]), $id);
+            $updatedEvent = fetchEvent($conn, $id);
+            if (!$updatedEvent) {
+                throw new RuntimeException("Updated event could not be loaded.");
+            }
+            if (array_key_exists("venue_id", $data) && intval($event["venue_id"]) !== intval($newVenueId)) {
+                releaseVenueIfUnused($conn, intval($event["venue_id"]), $id);
+            }
+            syncVenueStatusForEvent($conn, $id, intval($updatedEvent["venue_id"]), $updatedEvent["status"]);
+            $conn->commit();
+        } catch (Throwable $e) {
+            if ($conn->inTransaction()) {
+                $conn->rollBack();
+            }
+            throw $e;
         }
-        syncVenueStatusForEvent($conn, $id, intval($updatedEvent["venue_id"]), $updatedEvent["status"]);
 
         sendJson(200, [
             "success" => true,
@@ -601,9 +628,8 @@ try {
 
     sendJson(405, ["success" => false, "message" => "Method not allowed"]);
 
-} catch (PDOException $e) {
-
-    // Do not show database details to the client
+} catch (Throwable $e) {
+    error_log("Event API failed: " . $e->getMessage());
     sendJson(500, ["success" => false, "message" => "Internal server error"]);
 }
 

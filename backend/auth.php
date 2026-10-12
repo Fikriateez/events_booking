@@ -8,11 +8,25 @@ if (is_file($autoloadPath)) {
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 
+function getJwtSecret()
+{
+    $secret = getenv("EVENT_BOOKING_JWT_SECRET");
+    if ($secret === false || trim($secret) === "") {
+        $secret = $_SERVER["EVENT_BOOKING_JWT_SECRET"] ?? "";
+    }
+    if (!is_string($secret) || trim($secret) === "") {
+        throw new RuntimeException("JWT secret is not configured.");
+    }
+    return $secret;
+}
+
 function authenticateUser()
 {
-    $headers = getallheaders();
-
-    $authHeader = $headers["Authorization"] ?? "";
+    $headers = function_exists("getallheaders") ? getallheaders() : [];
+    $authHeader = $headers["Authorization"]
+        ?? $headers["authorization"]
+        ?? $_SERVER["HTTP_AUTHORIZATION"]
+        ?? "";
 
     if (empty($authHeader)) {
 
@@ -26,7 +40,7 @@ function authenticateUser()
         exit;
     }
 
-    if (!preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+    if (!preg_match('/^Bearer\s+(\S+)$/D', trim($authHeader), $matches)) {
 
         http_response_code(401);
 
@@ -40,11 +54,8 @@ function authenticateUser()
 
     $token = $matches[1];
 
-    // MUST be the same key used in login.php
-    $secretKey =
-        "event_booking_system_2026_super_secure_jwt_secret_key_123456789";
-
     try {
+        $secretKey = getJwtSecret();
         if (class_exists("Firebase\\JWT\\JWT")) {
             $decoded = JWT::decode(
                 $token,
@@ -78,13 +89,32 @@ function authenticateUser()
                 || !$payload) {
                 throw new RuntimeException("Invalid token.");
             }
+            if (!isset($payload->exp) || !is_numeric($payload->exp)
+                || (int) $payload->exp <= time()) {
+                throw new RuntimeException("Expired token.");
+            }
 
             $decoded = $payload;
+        }
+
+        if (!isset($decoded->exp) || !is_numeric($decoded->exp)
+            || (int) $decoded->exp <= time()) {
+            throw new RuntimeException("Expired token.");
         }
 
         return $decoded;
 
     } catch (Throwable $e) {
+        if ($e instanceof RuntimeException
+            && $e->getMessage() === "JWT secret is not configured.") {
+            error_log($e->getMessage());
+            http_response_code(500);
+            echo json_encode([
+                "success" => false,
+                "message" => "Authentication service is not configured"
+            ]);
+            exit;
+        }
 
         http_response_code(401);
 

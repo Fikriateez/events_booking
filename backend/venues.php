@@ -428,6 +428,20 @@ if ($method === 'PUT' || $method === 'PATCH') {
             respondError(409, "This venue is assigned to an active event and must remain In Use.");
         }
     }
+    if (array_key_exists('capacity', $clean)) {
+        $maxTicketsStmt = $conn->prepare(
+            "SELECT COALESCE(MAX(total_tickets), 0)
+             FROM events WHERE venue_id = ?"
+        );
+        $maxTicketsStmt->execute([$id]);
+        $maxEventTickets = (int) $maxTicketsStmt->fetchColumn();
+        if ((int) $clean['capacity'] < $maxEventTickets) {
+            respondError(
+                409,
+                "Capacity cannot be lower than the ticket capacity of an assigned event ({$maxEventTickets})."
+            );
+        }
+    }
 
     $newName = $clean['venue_name'] ?? $existing['venue_name'];
     $newLocation = $clean['location'] ?? $existing['location'];
