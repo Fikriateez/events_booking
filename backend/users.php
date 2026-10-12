@@ -65,12 +65,15 @@ try {
         ]);
     }
 
-    requireRole($currentUser, ["Administrator"]);
-    $data = json_decode(file_get_contents("php://input"), true);
-    if (!is_array($data)) {
-        sendUserJson(400, ["success" => false, "message" => "Request body must be valid JSON."]);
-    }
+        requireRole($currentUser, ["Administrator"]);
 
+            
+            if ($method === "POST" || $method === "PUT") {
+                $data = json_decode(file_get_contents("php://input"), true);
+                if (!is_array($data)) {
+                    sendUserJson(400, ["success" => false, "message" => "Request body must be valid JSON."]);
+                }
+            }
     if ($method === "POST") {
         $name = trim((string) ($data["name"] ?? ""));
         $email = trim((string) ($data["email"] ?? ""));
