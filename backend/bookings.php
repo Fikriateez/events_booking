@@ -9,12 +9,10 @@ header("Content-Type: application/json; charset=UTF-8");
 header("Access-Control-Allow-Methods: POST, GET, PUT, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With");
 
-
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
 }
-
 
 require_once 'db.php'; 
 require_once 'auth.php';
@@ -25,7 +23,6 @@ function sendBookingJson($statusCode, $body)
     echo json_encode($body);
     exit;
 }
-
 
 function sendSendGridEmail($toEmail, $subject, $htmlContent) {
     $apiKey = getenv('SENDGRID_API_KEY');
@@ -102,7 +99,8 @@ function sendSendGridEmail($toEmail, $subject, $htmlContent) {
     return false;
 }
 
-function sendResponseThenEmail($response, $toEmail, $subject, $htmlContent) {
+function sendResponseThenEmail($response, $toEmail, $subject, $htmlContent, $statusCode = 200) {
+    http_response_code($statusCode);
     $emailSent = sendSendGridEmail($toEmail, $subject, $htmlContent);
     $response['email_sent'] = $emailSent;
     $response['email_message'] = $emailSent
@@ -118,7 +116,9 @@ function sendResponseThenEmail($response, $toEmail, $subject, $htmlContent) {
 
 $method = $_SERVER['REQUEST_METHOD'];
 
-
+// ============================================================================
+// GET METHOD: RETRIEVE BOOKINGS
+// ============================================================================
 if ($method === 'GET') {
     try {
         $currentUser = authenticateUser();
@@ -159,6 +159,7 @@ if ($method === 'GET') {
             $where = ['1 = 1'];
             $params = [];
         }
+
         if ($search !== '') {
             $where[] = '(e.title LIKE ? OR CAST(b.booking_id AS CHAR) LIKE ?)';
             $params[] = "%{$search}%";
@@ -177,6 +178,8 @@ if ($method === 'GET') {
         );
         $countStmt->execute($params);
         $total = (int) $countStmt->fetchColumn();
+        
+        // Pembetulan ralat offset ($page - 1)
         $offset = ($page - 1) * $limit;
 
         $stmt = $conn->prepare("
@@ -226,7 +229,9 @@ if ($method === 'GET') {
     exit;
 }
 
-
+// ============================================================================
+// POST METHOD: CREATE BOOKING
+// ============================================================================
 if ($method === 'POST') {
     $currentUser = authenticateUser();
     requireRole($currentUser, ['Customer']);
@@ -293,6 +298,8 @@ if ($method === 'POST') {
         $eventName = $event['title'];
         $safeEventName = htmlspecialchars($eventName, ENT_QUOTES, 'UTF-8');
         $ticketPrice = (float) $event['ticket_price'];
+        
+        // Pembetulan ralat pendaraban ($ticketPrice * $quantity)
         $totalPrice = $ticketPrice * $quantity;
 
         $insertStmt = $conn->prepare(
@@ -306,7 +313,6 @@ if ($method === 'POST') {
 
         $userEmail = $user['email'];
 
-       
         $subject = "Ticket Booking Confirmation - #" . $bookingId;
         $htmlContent = "
             <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;'>
@@ -321,15 +327,18 @@ if ($method === 'POST') {
                 <p>Status: <strong style='color: #16a34a;'>Confirmed</strong></p>
             </div>
         ";
+        
         $response = [
             "success" => true,
             "message" => "Booking successful. Confirmation email queued.",
-            "booking_id" => $bookingId,
+            "booking_id" => (int) $bookingId,
             "total_price" => $totalPrice,
             "email_type" => "booking_confirmation",
             "email_subject" => $subject
         ];
-        sendResponseThenEmail($response, $userEmail, $subject, $htmlContent);
+        
+        // Menggunakan status 201 Created untuk operasi POST
+        sendResponseThenEmail($response, $userEmail, $subject, $htmlContent, 201);
 
     } catch (Throwable $e) {
         if ($conn->inTransaction()) {
@@ -344,10 +353,12 @@ if ($method === 'POST') {
     exit;
 }
 
-
+// ============================================================================
+// PUT METHOD: CANCEL BOOKING
+// ============================================================================
 if ($method === 'PUT') {
     $currentUser = authenticateUser();
-    requireRole($currentUser, ['Customer']);
+    requireRole($currentUser, ['Customer', 'Administrator']);
     $userId = (int) $currentUser->user_id;
     $rawInput = file_get_contents("php://input");
     $data = json_decode($rawInput, true);
@@ -373,19 +384,22 @@ if ($method === 'PUT') {
     try {
         $conn->beginTransaction();
 
-        $stmt = $conn->prepare(
-            "SELECT * FROM bookings
-             WHERE booking_id = ? AND user_id = ?
-             FOR UPDATE"
-        );
-        $stmt->execute([$bookingId, $userId]);
+        // Jika Administrator, izinkan akses ke mana-mana tempahan; Jika Customer, terhad ke akaun sendiri
+        if ($currentUser->role === 'Administrator') {
+            $stmt = $conn->prepare("SELECT * FROM bookings WHERE booking_id = ? FOR UPDATE");
+            $stmt->execute([$bookingId]);
+        } else {
+            $stmt = $conn->prepare("SELECT * FROM bookings WHERE booking_id = ? AND user_id = ? FOR UPDATE");
+            $stmt->execute([$bookingId, $userId]);
+        }
+        
         $booking = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$booking) {
             $conn->rollBack();
             sendBookingJson(404, [
                 "success" => false,
-                "message" => "Booking not found for the authenticated user."
+                "message" => "Booking not found or unauthorised."
             ]);
         }
 
@@ -399,9 +413,9 @@ if ($method === 'PUT') {
 
         $updateStmt = $conn->prepare(
             "UPDATE bookings SET booking_status = ?
-             WHERE booking_id = ? AND user_id = ? AND booking_status <> 'Cancelled'"
+             WHERE booking_id = ? AND booking_status <> 'Cancelled'"
         );
-        $updateStmt->execute([$bookingStatus, $bookingId, $userId]);
+        $updateStmt->execute([$bookingStatus, $bookingId]);
         if ($updateStmt->rowCount() !== 1) {
             throw new RuntimeException("Booking status was not updated.");
         }
@@ -420,10 +434,10 @@ if ($method === 'PUT') {
         }
 
         $userStmt = $conn->prepare("SELECT email FROM users WHERE user_id = ?");
-        $userStmt->execute([$userId]);
+        $userStmt->execute([$booking['user_id']]);
         $user = $userStmt->fetch(PDO::FETCH_ASSOC);
         if (!$user) {
-            throw new RuntimeException("Authenticated user was not found.");
+            throw new RuntimeException("User associated with booking was not found.");
         }
         $userEmail = $user['email'];
         $eventStmt = $conn->prepare("SELECT title FROM events WHERE event_id = ?");
@@ -432,7 +446,6 @@ if ($method === 'PUT') {
         $safeEventName = htmlspecialchars($eventName, ENT_QUOTES, 'UTF-8');
         $conn->commit();
 
-        
         $subject = "Booking Cancellation Notice - #" . $bookingId;
         $htmlContent = "
             <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;'>
@@ -450,11 +463,11 @@ if ($method === 'PUT') {
         $response = [
             "success" => true,
             "message" => "Booking #{$bookingId} updated to {$bookingStatus}.",
-            "booking_id" => $bookingId,
+            "booking_id" => (int) $bookingId,
             "email_type" => "booking_cancellation",
             "email_subject" => $subject
         ];
-        sendResponseThenEmail($response, $userEmail, $subject, $htmlContent);
+        sendResponseThenEmail($response, $userEmail, $subject, $htmlContent, 200);
 
     } catch (Throwable $e) {
         if ($conn->inTransaction()) {
@@ -468,3 +481,9 @@ if ($method === 'PUT') {
     }
     exit;
 }
+
+// Fallback jika kaedah HTTP lain dipanggil (e.g. DELETE / PATCH)
+sendBookingJson(405, [
+    "success" => false,
+    "message" => "Method not allowed."
+]);
